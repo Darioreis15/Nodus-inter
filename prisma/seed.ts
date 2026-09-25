@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 async function main() {
   const starter = await prisma.plan.upsert({
     where: { slug: 'starter' },
-    update: {},
+    update: { priceCents: 9900 },
     create: {
       name: 'Starter',
       slug: 'starter',
@@ -18,7 +18,7 @@ async function main() {
 
   await prisma.plan.upsert({
     where: { slug: 'pro' },
-    update: {},
+    update: { priceCents: 29900 },
     create: {
       name: 'Pro',
       slug: 'pro',
