@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import { ConflictException, UnprocessableEntityException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AsaasClient } from './asaas.client';
 import { SubscribeDto } from './dto/subscribe.dto';
@@ -23,6 +23,13 @@ export class BillingService {
       include: { plan: true },
     });
 
+    const priceCents = tenant.plan.priceCents;
+    if (!Number.isSafeInteger(priceCents) || priceCents <= 0) {
+      throw new UnprocessableEntityException(
+        'Plano sem preco valido. Execute npm run prisma:seed no banco usado pelo backend antes de assinar.',
+      );
+    }
+
     const customer = await this.asaas.createCustomer({
       name: tenant.name,
       cpfCnpj: dto.cpfCnpj,
@@ -34,7 +41,7 @@ export class BillingService {
 
     const subscription = await this.asaas.createSubscription({
       customer: customer.id,
-      value: tenant.plan.priceCents / 100,
+      value: priceCents / 100,
       cycle: 'MONTHLY',
       description: `Nodus - plano ${tenant.plan.name}`,
       nextDueDate: nextDueDate.toISOString().slice(0, 10),

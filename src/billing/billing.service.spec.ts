@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, UnprocessableEntityException } from '@nestjs/common';
 import { BillingService } from './billing.service';
 
 describe('BillingService', () => {
@@ -29,6 +29,20 @@ describe('BillingService', () => {
 
       expect(asaas.createCustomer).not.toHaveBeenCalled();
     });
+
+    it.each([0, -1, NaN, Infinity, undefined, 99.5])(
+      'rejeita preco invalido %s antes de comunicar com o Asaas',
+      async (priceCents) => {
+        prisma.tenant.findUniqueOrThrow.mockResolvedValue({
+          name: 'Empresa Demo', plan: { name: 'Starter', priceCents },
+        });
+        await expect(service.subscribe('tenant-1', { cpfCnpj: '12345678900' }))
+          .rejects.toBeInstanceOf(UnprocessableEntityException);
+        expect(asaas.createCustomer).not.toHaveBeenCalled();
+        expect(asaas.createSubscription).not.toHaveBeenCalled();
+        expect(prisma.subscription.create).not.toHaveBeenCalled();
+      },
+    );
 
     it('cria cliente e assinatura no Asaas usando o preco do plano do tenant', async () => {
       prisma.subscription.findUnique.mockResolvedValue(null);

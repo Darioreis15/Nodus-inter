@@ -197,14 +197,85 @@ produção pra valer) e as variáveis `ASAAS_API_KEY`, `ASAAS_BASE_URL` e
 |--------|----------------------|-------------|--------------------------------------------------------------------|
 | POST   | `/billing/subscribe` | Admin       | Cria cliente + assinatura no Asaas pro plano atual do tenant, devolve o link de pagamento (`invoiceUrl`) |
 | GET    | `/billing/status`    | Autenticado | Status da assinatura e do tenant                                    |
-| POST   | `/webhooks/asaas?token=...` | Asaas (público) | Recebe confirmação/vencimento de pagamento               |
+| POST   | `/webhooks/asaas` | Asaas (público) | Recebe confirmação/vencimento de pagamento               |
 
-No painel do Asaas, configure o webhook apontando pra
-`APP_BASE_URL/webhooks/asaas?token=SEU_ASAAS_WEBHOOK_TOKEN` — esse `token` é
-uma verificação simples por query string, já que o Asaas não assina o corpo
-por padrão. Quando um pagamento vence (`PAYMENT_OVERDUE`), o tenant é
-suspenso automaticamente (`Tenant.status = SUSPENDED`) e o login passa a ser
-bloqueado até o pagamento ser confirmado de novo.
+No painel do **Asaas Sandbox**, configure o webhook em
+`APP_BASE_URL/webhooks/asaas`, sem token na URL. O campo de autenticacao do
+webhook deve ter exatamente o mesmo valor de `ASAAS_WEBHOOK_TOKEN` no processo
+que executa a API. O Asaas envia esse segredo no header `asaas-access-token`;
+ele e diferente da API Key. A query `?token=...` ainda e aceita temporariamente
+quando o header esta ausente. Se houver header, ele tem precedencia. Sem segredo
+configurado no backend, a chamada e rejeitada. Respostas processadas retornam HTTP 200.
+
+Selecione `PAYMENT_CONFIRMED`, `PAYMENT_RECEIVED` e `PAYMENT_OVERDUE`.
+A confirmacao ativa assinatura e tenant; o vencimento suspende o tenant e bloqueia
+novos logins. Tokens JWT ja emitidos nao sao invalidados por esta implementacao.
+
+### Atualizacao dos precos e configuracao do ambiente
+
+`prisma db push` sincroniza o schema, mas nao executa este seed nem configura as
+variaveis de ambiente do servidor. Planos anteriores a Fase 5 podem ter recebido
+`price_cents = 0`. O seed agora atualiza Starter para **9900 centavos** e Pro para
+**29900 centavos**, inclusive se ja existirem (sobrescreve precos personalizados
+desses dois planos). Limites e demais planos nao sao alterados.
+
+1. Publique a versao corrigida no servidor que executa o backend.
+2. Configure nesse processo `DATABASE_URL`, `ASAAS_API_KEY`,
+   `ASAAS_BASE_URL=https://api-sandbox.asaas.com/v3` e `ASAAS_WEBHOOK_TOKEN`.
+   Se a API roda na Contabo e apenas o PostgreSQL fica no Render, as variaveis do
+   Asaas ficam na Contabo. Reinicie o processo apos mudar seu ambiente.
+3. Na raiz do projeto atualizado, com o **mesmo DATABASE_URL usado pela API**,
+   execute uma vez:
+
+   ```bash
+   npm run prisma:seed
+   ```
+
+   O seed tambem cria o tenant demo se ele ainda nao existir (ver Setup local).
+   Nao execute automaticamente a cada inicializacao. O `.env` da sua maquina
+   nao e enviado ao Render/Contabo pelo `db push`.
+4. Consulte `GET /billing/status` com JWT e confira `plan.priceCents`.
+   Deve ser 9900 para Starter ou 29900 para Pro.
+5. Envie `POST /billing/subscribe` com JWT de admin e `cpfCnpj` de teste aceito
+   pelo Sandbox. O valor vem do plano no banco, nao do corpo da requisicao.
+   Preco invalido retorna HTTP 422 antes de criar cliente no Asaas.
+
+Se o backend esta publicado em `https://nodus-inter.onrender.com`, use
+`https://nodus-inter.onrender.com/webhooks/asaas`. Se ele esta na Contabo, use
+seu dominio HTTPS publico apontando para essa API.
+
+### Testes no Sandbox
+
+A conta Sandbox e independente da conta de producao: cadastre-se em
+https://sandbox.asaas.com e gere a chave desse ambiente.
+
+Abra a cobranca pelo `invoiceUrl` e confirme o pagamento na interface do Sandbox.
+Tambem existem endpoints oficiais de simulacao, exclusivamente no Sandbox:
+
+- `POST https://api-sandbox.asaas.com/v3/sandbox/payment/{id}/confirm`
+- `POST https://api-sandbox.asaas.com/v3/sandbox/payment/{id}/overdue`
+
+Nessas chamadas use o header `access_token` com a **API Key do Sandbox**, e
+`User-Agent: NodusWhatsappSaas/1.0`. O `{id}` e o ID da **cobranca** (`pay_...`),
+nao o ID da assinatura (`sub_...`). Obtenha-o no painel ou com
+`GET /subscriptions/{subscriptionId}/payments` na API do Asaas. Para testar
+vencimento, use uma cobranca pendente de teste separada.
+
+Confira a entrega do webhook no painel do Asaas e os logs do servidor da API.
+Apos confirmacao, `GET /billing/status` deve indicar `tenantStatus: ACTIVE` e
+`subscription.status: ACTIVE`. Apos vencimento, confira `SUSPENDED` e `OVERDUE`
+no banco/logs e o bloqueio de um novo login. Um POST manual no webhook testa
+somente o receptor local, nao a entrega real do Asaas.
+
+Se um segredo foi exposto, substitua-o no painel e no ambiente do backend.
+Nao versione `.env` nem coloque tokens em URLs. O log de requisicoes registra
+apenas o caminho, sem query string.
+
+Referencias oficiais:
+- https://docs.asaas.com/docs/sandbox
+- https://docs.asaas.com/docs/sobre-os-webhooks
+- https://docs.asaas.com/reference/confirmar-pagamento
+- https://docs.asaas.com/reference/forcar-vencimento
 
 ## Isolamento multi-tenant
 

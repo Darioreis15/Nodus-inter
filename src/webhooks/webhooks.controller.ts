@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Logger, Param, Post, Query, Res, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Logger, Param, Post, Query, Res, UnauthorizedException } from '@nestjs/common';
 import { Response } from 'express';
 import { WebhooksService } from './webhooks.service';
 import { BillingService } from '../billing/billing.service';
@@ -50,14 +50,18 @@ export class WebhooksController {
     return this.webhooksService.handleMetaEvent(payload);
   }
 
-  /**
-   * O Asaas nao assina o corpo por padrao -- a forma simples de validar a
-   * origem e registrar essa URL com um token secreto na query string
-   * (?token=...) na hora de configurar o webhook no painel deles.
-   */
+  /** O Asaas envia o token configurado no header asaas-access-token. */
   @Post('asaas')
-  handleAsaas(@Query('token') token: string, @Body() payload: any) {
-    if (token !== process.env.ASAAS_WEBHOOK_TOKEN) {
+  @HttpCode(200)
+  handleAsaas(
+    @Headers('asaas-access-token') headerToken: string | undefined,
+    @Query('token') queryToken: string | undefined,
+    @Body() payload: any,
+  ) {
+    const expectedToken = process.env.ASAAS_WEBHOOK_TOKEN;
+    // Compatibilidade temporaria: o header sempre tem precedencia sobre a URL.
+    const token = headerToken ?? queryToken;
+    if (!expectedToken?.trim() || token !== expectedToken) {
       throw new UnauthorizedException('Token de webhook invalido.');
     }
     this.logger.log(`[Asaas] evento recebido: ${payload?.event}`);
