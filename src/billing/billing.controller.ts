@@ -4,6 +4,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { BillingService } from './billing.service';
+import { AllowSuspendedTenant } from '../common/decorators/allow-suspended-tenant.decorator';
 import { SubscribeDto } from './dto/subscribe.dto';
 
 @UseGuards(JwtAuthGuard)
@@ -11,6 +12,7 @@ import { SubscribeDto } from './dto/subscribe.dto';
 export class BillingController {
   constructor(private billingService: BillingService) {}
 
+  @AllowSuspendedTenant()
   @Get('status')
   status(@CurrentUser() user: AuthenticatedUser) {
     return this.billingService.getStatus(user.tenantId);
