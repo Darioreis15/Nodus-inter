@@ -1,9 +1,11 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { assertTenantAccess } from '../../common/guards/tenant-access';
 import { ApiKeysService } from '../../api-keys/api-keys.service';
 
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
-  constructor(private apiKeys: ApiKeysService) {}
+  constructor(private apiKeys: ApiKeysService, private prisma: PrismaService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
@@ -19,6 +21,7 @@ export class ApiKeyGuard implements CanActivate {
       throw new UnauthorizedException('Chave de API invalida ou revogada.');
     }
 
+    await assertTenantAccess(this.prisma, tenantId);
     request.apiTenantId = tenantId;
     return true;
   }

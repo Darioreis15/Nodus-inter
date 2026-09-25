@@ -209,7 +209,7 @@ configurado no backend, a chamada e rejeitada. Respostas processadas retornam HT
 
 Selecione `PAYMENT_CONFIRMED`, `PAYMENT_RECEIVED` e `PAYMENT_OVERDUE`.
 A confirmacao ativa assinatura e tenant; o vencimento suspende o tenant e bloqueia
-novos logins. Tokens JWT ja emitidos nao sao invalidados por esta implementacao.
+novos logins. JWTs ja emitidos e chaves de API tambem sao bloqueados nas operacoes protegidas enquanto o tenant estiver suspenso.
 
 ### Atualizacao dos precos e configuracao do ambiente
 
@@ -292,5 +292,35 @@ Todas as 5 fases do plano original estão implementadas: fundação
 multi-tenant, conectores de canal, inbox/atendimento, API aberta, e
 billing/automação/relatórios. Próximos passos ficam a critério de uso real
 em produção — coisas como paginação nas listagens, testes e2e com banco de
-verdade, e enforcement mais fino do `TenantStatus` em outras rotas (hoje só
-o login checa).
+verdade, e evolucao da experiencia de regularizacao de cobrancas.
+
+
+### Suspensao de sessoes existentes
+
+Todas as rotas com `JwtAuthGuard` consultam o status atual do tenant no banco
+apos validar o JWT. Operacoes protegidas retornam HTTP 403 com
+`code: TENANT_SUSPENDED` durante a suspensao. Chaves de API seguem a mesma regra,
+sem cache de status. Um JWT valido volta a funcionar na proxima chamada apos
+reativacao; tokens expirados continuam exigindo novo login.
+
+A unica excecao JWT e `GET /billing/status`, que permanece acessivel a uma
+sessao valida durante a suspensao para consultar a pendencia. Ela nao permite
+acesso anonimo. O link de pagamento ja emitido pelo Asaas continua sendo usado
+para regularizacao; este ajuste nao adiciona tela ou endpoint para recuperar
+esse link. Novos logins de tenants suspensos continuam bloqueados.
+
+Webhooks de entrada mantem suas regras de autenticacao e processamento,
+inclusive o Asaas, para receber a confirmacao e reativar o tenant. Este bloqueio
+se aplica as chamadas autenticadas por JWT/API key; nao interrompe trabalhos
+ja iniciados nem desliga conectores ou respostas automaticas de webhooks.
+
+Teste no Postman apos o deploy:
+1. Guarde um JWT de tenant ativo e confirme `GET /conversations` com HTTP 200.
+2. Simule `PAYMENT_OVERDUE` para sua assinatura Sandbox.
+3. Com o MESMO JWT, confirme HTTP 403 em `/conversations` e HTTP 200 com status
+   suspenso em `/billing/status`. Um novo login tambem deve continuar bloqueado.
+4. Reative com pagamento Sandbox (ou `PAYMENT_CONFIRMED` no teste manual).
+5. Com o mesmo JWT ainda valido, confirme que `/conversations` volta a responder.
+6. Repita o bloqueio com uma chave existente em `/public/v1/conversations`.
+
+Nao ha alteracao de schema ou seed nesta melhoria. Basta publicar o codigo.
