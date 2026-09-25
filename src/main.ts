@@ -18,7 +18,7 @@ async function bootstrap() {
   // no servidor.
   app.use((req: any, _res: any, next: () => void) => {
     // eslint-disable-next-line no-console
-    console.log(`[REQUEST] ${new Date().toISOString()} ${req.method} ${req.originalUrl}`);
+    console.log(`[REQUEST] ${new Date().toISOString()} ${req.method} ${req.path}`);
     next();
   });
 
