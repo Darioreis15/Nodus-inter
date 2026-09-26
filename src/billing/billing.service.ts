@@ -104,30 +104,21 @@ export class BillingService {
       return { ok: true };
     }
 
-    if (event === 'PAYMENT_CONFIRMED' || event === 'PAYMENT_RECEIVED') {
-      await this.prisma.subscription.update({
-        where: { id: subscription.id },
-        data: { status: 'ACTIVE' },
-      });
-      await this.prisma.tenant.update({
-        where: { id: subscription.tenantId },
-        data: { status: 'ACTIVE' },
-      });
-      this.logger.log(`Assinatura ${asaasSubscriptionId} confirmada -- tenant reativado.`);
-    } else if (event === 'PAYMENT_OVERDUE') {
-      await this.prisma.subscription.update({
-        where: { id: subscription.id },
-        data: { status: 'OVERDUE' },
-      });
-      await this.prisma.tenant.update({
-        where: { id: subscription.tenantId },
-        data: { status: 'SUSPENDED' },
-      });
-      this.logger.warn(`Assinatura ${asaasSubscriptionId} vencida -- tenant suspenso.`);
-    } else {
-      this.logger.debug(`Evento Asaas nao tratado: ${event}`);
-    }
-
+    if (!['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED', 'PAYMENT_OVERDUE'].includes(event)) return { ok: true };
+    // Reconciliacao autoritativa: um payload manual/antigo nao decide o saldo.
+    await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM subscriptions WHERE id = ${subscription.id} FOR UPDATE`;
+      const eventId = typeof payload?.id === 'string' ? `asaas:${payload.id}` : null;
+      if (eventId && await tx.providerEvent.findUnique({ where: { id: eventId } })) return;
+      const overdue = await this.asaas.getSubscriptionPayments(asaasSubscriptionId, 'OVERDUE');
+      const confirmed = await this.asaas.getSubscriptionPayments(asaasSubscriptionId, 'CONFIRMED');
+      const received = await this.asaas.getSubscriptionPayments(asaasSubscriptionId, 'RECEIVED');
+      const status = overdue.data.length ? 'OVERDUE' : confirmed.data.length || received.data.length ? 'ACTIVE' : 'PENDING';
+      await tx.subscription.update({ where: { id: subscription.id }, data: { status } });
+      if (status !== 'PENDING') await tx.tenant.update({ where: { id: subscription.tenantId }, data: { status: status === 'ACTIVE' ? 'ACTIVE' : 'SUSPENDED' } });
+      if (eventId) await tx.providerEvent.create({ data: { id: eventId } });
+      await tx.auditEvent.create({ data: { tenantId: subscription.tenantId, action: `billing.${status.toLowerCase()}` } });
+    }, { timeout: 40000, maxWait: 5000 });
     return { ok: true };
   }
 }

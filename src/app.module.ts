@@ -1,5 +1,6 @@
+import { PrivacyModule } from './privacy/privacy.controller';
 import { Module } from '@nestjs/common';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { RateGuard, SecurityModule } from './security/rate.guard';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
@@ -16,15 +17,9 @@ import { BillingModule } from './billing/billing.module';
 
 @Module({
   imports: [
-    // 10 tentativas por minuto por IP -- mesmo limite usado no rate limiter
-    // de login do outro SaaS da Nodus.
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60_000,
-        limit: 10,
-      },
-    ]),
     PrismaModule,
+    PrivacyModule,
+    SecurityModule,
     AuthModule,
     TenantsModule,
     UsersModule,
@@ -40,7 +35,7 @@ import { BillingModule } from './billing/billing.module';
   providers: [
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,
+      useExisting: RateGuard,
     },
   ],
 })

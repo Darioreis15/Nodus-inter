@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, ForbiddenException } from '@nestjs/common';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -41,8 +41,8 @@ export class UsersService {
       throw new ConflictException('Ja existe uma conta com esse e-mail.');
     }
 
-    const temporaryPassword = crypto.randomBytes(6).toString('base64url');
-    const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+    const temporaryPassword = crypto.randomBytes(18).toString('base64url');
+    const passwordHash = await bcrypt.hash(temporaryPassword, 12);
 
     const user = await this.prisma.user.create({
       data: {

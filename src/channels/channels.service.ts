@@ -1,4 +1,5 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { seal } from '../security/secrets';
+import { ForbiddenException, Injectable, NotFoundException, BadGatewayException } from '@nestjs/common';
 import { ChannelRecord as Channel } from './channel.types';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -39,7 +40,13 @@ export class ChannelsService {
     }
 
     if (dto.type === ChannelTypeDto.OFFICIAL_META) {
+      const response = await fetch(`https://graph.facebook.com/v20.0/${encodeURIComponent(dto.phoneNumberId!)}?fields=id`, {
+        headers: { Authorization: `Bearer ${dto.accessToken}` }, signal: AbortSignal.timeout(10000),
+      });
+      const identity = await response.json();
+      if (!response.ok || identity.id !== dto.phoneNumberId) throw new BadGatewayException('Nao foi possivel validar a propriedade do numero Meta.');
       return this.prisma.channel.create({
+        select: { id: true, name: true, type: true, status: true },
         data: {
           tenantId,
           type: 'OFFICIAL_META',
@@ -48,7 +55,7 @@ export class ChannelsService {
           externalId: dto.phoneNumberId,
           config: {
             phoneNumberId: dto.phoneNumberId,
-            accessToken: dto.accessToken,
+            accessToken: seal(dto.accessToken!, `meta:${dto.phoneNumberId}`),
             wabaId: dto.wabaId,
           },
         },
@@ -102,6 +109,7 @@ export class ChannelsService {
       throw new ForbiddenException('Informe a mensagem de resposta automatica pra habilitar.');
     }
     return this.prisma.channel.update({
+      select: { id: true, name: true, autoReplyEnabled: true, autoReplyMessage: true },
       where: { id: channelId },
       data: { autoReplyEnabled: enabled, autoReplyMessage: enabled ? message : null },
     });

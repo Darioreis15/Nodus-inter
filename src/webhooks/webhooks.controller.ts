@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Headers, HttpCode, Logger, Param, Post, Query, Res, UnauthorizedException } from '@nestjs/common';
+import { createHmac } from 'crypto';
+import { secretMatches } from '../security/secrets';
+import { Body, Controller, Get, Headers, HttpCode, Logger, Param, Post, Query, Req, Res, UnauthorizedException } from '@nestjs/common';
 import { Response } from 'express';
 import { WebhooksService } from './webhooks.service';
 import { BillingService } from '../billing/billing.service';
@@ -13,9 +15,9 @@ export class WebhooksController {
   ) {}
 
   @Post('evolution/:channelId')
-  handleEvolution(@Param('channelId') channelId: string, @Body() payload: any) {
+  handleEvolution(@Param('channelId') channelId: string, @Body() payload: any, @Headers('x-evolution-token') token: string) {
+    if (!secretMatches(token, process.env.EVOLUTION_WEBHOOK_TOKEN)) throw new UnauthorizedException();
     this.logger.log(`[Evolution] webhook recebido para o canal ${channelId}`);
-    this.logger.log(JSON.stringify(payload, null, 2));
     return this.webhooksService.handleEvolutionEvent(channelId, payload);
   }
 
@@ -34,7 +36,7 @@ export class WebhooksController {
       `[Meta] verificacao recebida: mode=${mode} token=${token ? '(presente)' : '(ausente)'}`,
     );
 
-    if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
+    if (mode === 'subscribe' && secretMatches(token, process.env.META_VERIFY_TOKEN)) {
       this.logger.log('[Meta] verificacao OK, devolvendo challenge.');
       res.status(200).send(challenge);
       return;
@@ -44,9 +46,12 @@ export class WebhooksController {
   }
 
   @Post('meta')
-  handleMeta(@Body() payload: any) {
+  handleMeta(@Body() payload: any, @Req() req: any) {
+    const secret = process.env.META_APP_SECRET;
+    if (!secret || !Buffer.isBuffer(req.rawBody)) throw new UnauthorizedException();
+    const expected = 'sha256=' + createHmac('sha256', secret).update(req.rawBody).digest('hex');
+    if (!secretMatches(req.headers['x-hub-signature-256'], expected)) throw new UnauthorizedException();
     this.logger.log('[Meta] webhook de evento recebido');
-    this.logger.log(JSON.stringify(payload, null, 2));
     return this.webhooksService.handleMetaEvent(payload);
   }
 
@@ -59,9 +64,9 @@ export class WebhooksController {
     @Body() payload: any,
   ) {
     const expectedToken = process.env.ASAAS_WEBHOOK_TOKEN;
-    // Compatibilidade temporaria: o header sempre tem precedencia sobre a URL.
-    const token = headerToken ?? queryToken;
-    if (!expectedToken?.trim() || token !== expectedToken) {
+    // Query legada nao e aceita: segredos nao devem transitar em URLs.
+    const token = headerToken;
+    if (!secretMatches(token, expectedToken)) {
       throw new UnauthorizedException('Token de webhook invalido.');
     }
     this.logger.log(`[Asaas] evento recebido: ${payload?.event}`);

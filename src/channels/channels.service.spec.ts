@@ -2,12 +2,15 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ChannelsService } from './channels.service';
 import { ChannelTypeDto } from './dto/create-channel.dto';
 
+afterEach(() => jest.restoreAllMocks());
+
 describe('ChannelsService', () => {
   let prisma: any;
   let evolutionConnector: any;
   let service: ChannelsService;
 
   beforeEach(() => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ id: '1234567890' }) } as any);
     prisma = {
       tenant: { findUniqueOrThrow: jest.fn() },
       channel: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn() },

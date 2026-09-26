@@ -1,3 +1,8 @@
+> **Atualizacao de seguranca:** leia [SECURITY.md](SECURITY.md) ANTES de integrar/publicar.
+> Esta versao exige novas variaveis, baseline/migracao e criptografia dos segredos existentes.
+> As instrucoes historicas abaixo descrevem as fases anteriores; em caso de conflito,
+> o procedimento de SECURITY.md substitui o setup antigo (inclusive seed, JWT e webhook).
+
 # Nodus WhatsApp SaaS — API (Fase 1)
 
 Fundação multi-tenant: autenticação JWT, modelo de tenant/plano, e escopo de

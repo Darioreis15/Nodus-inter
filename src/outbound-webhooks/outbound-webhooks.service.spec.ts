@@ -1,3 +1,6 @@
+import { seal } from '../security/secrets';
+import { deliverWebhook } from '../security/safe-webhook';
+jest.mock('../security/safe-webhook', () => ({ resolveWebhook: jest.fn().mockResolvedValue({}), deliverWebhook: jest.fn() }));
 import { OutboundWebhooksService } from './outbound-webhooks.service';
 
 describe('OutboundWebhooksService', () => {
@@ -7,43 +10,43 @@ describe('OutboundWebhooksService', () => {
 
   beforeEach(() => {
     prisma = {
-      webhookSubscription: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+      webhookSubscription: { count: jest.fn().mockResolvedValue(0), create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
     };
     service = new OutboundWebhooksService(prisma);
-    fetchMock = jest.fn().mockResolvedValue({ status: 200 });
-    (global as any).fetch = fetchMock;
+    fetchMock = deliverWebhook as jest.Mock;
+    fetchMock.mockReset().mockResolvedValue(200);
   });
 
   it('so entrega pra assinaturas que escutam aquele evento especifico', async () => {
     prisma.webhookSubscription.findMany.mockResolvedValue([
-      { id: 'sub-1', url: 'https://a.com/hook', secret: 's1', events: ['message.received'] },
-      { id: 'sub-2', url: 'https://b.com/hook', secret: 's2', events: ['conversation.assigned'] },
+      { id: 'sub-1', url: 'https://a.com/hook', tenantId: 'tenant-1', secret: seal('s1', 'webhook:tenant-1'), events: ['message.received'] },
+      { id: 'sub-2', url: 'https://b.com/hook', tenantId: 'tenant-1', secret: seal('s2', 'webhook:tenant-1'), events: ['conversation.assigned'] },
     ]);
 
     await service.dispatch('tenant-1', 'message.received', { conversationId: 'conv-1' });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith('https://a.com/hook', expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith('https://a.com/hook', expect.any(String), expect.any(Object));
   });
 
   it('assina o payload com HMAC usando o secret da assinatura', async () => {
     prisma.webhookSubscription.findMany.mockResolvedValue([
-      { id: 'sub-1', url: 'https://a.com/hook', secret: 'segredo-123', events: ['message.received'] },
+      { id: 'sub-1', url: 'https://a.com/hook', tenantId: 'tenant-1', secret: seal('segredo-123', 'webhook:tenant-1'), events: ['message.received'] },
     ]);
 
     await service.dispatch('tenant-1', 'message.received', { conversationId: 'conv-1' });
 
-    const [, options] = fetchMock.mock.calls[0];
-    expect(options.headers['X-Nodus-Signature']).toBeDefined();
-    expect(options.headers['X-Nodus-Event']).toBe('message.received');
+    const [, , headers] = fetchMock.mock.calls[0];
+    expect(headers['X-Nodus-Signature']).toBeDefined();
+    expect(headers['X-Nodus-Event']).toBe('message.received');
   });
 
   it('uma entrega falhando nao derruba as outras nem lanca erro pra quem chamou', async () => {
     prisma.webhookSubscription.findMany.mockResolvedValue([
-      { id: 'sub-1', url: 'https://fora-do-ar.com/hook', secret: 's1', events: ['message.received'] },
-      { id: 'sub-2', url: 'https://b.com/hook', secret: 's2', events: ['message.received'] },
+      { id: 'sub-1', url: 'https://fora-do-ar.com/hook', tenantId: 'tenant-1', secret: seal('s1', 'webhook:tenant-1'), events: ['message.received'] },
+      { id: 'sub-2', url: 'https://b.com/hook', tenantId: 'tenant-1', secret: seal('s2', 'webhook:tenant-1'), events: ['message.received'] },
     ]);
-    fetchMock.mockRejectedValueOnce(new Error('ECONNREFUSED')).mockResolvedValueOnce({ status: 200 });
+    fetchMock.mockRejectedValueOnce(new Error('ECONNREFUSED')).mockResolvedValueOnce(200);
 
     await expect(
       service.dispatch('tenant-1', 'message.received', { conversationId: 'conv-1' }),
