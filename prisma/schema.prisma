@@ -97,6 +97,8 @@ model User {
   passwordHash       String   @map("password_hash")
   role               UserRole @default(AGENT)
   mustChangePassword Boolean  @default(true) @map("must_change_password")
+  lockedUntil        DateTime? @map("locked_until")
+  tokenVersion       Int @default(0) @map("token_version")
   failedLoginCount   Int      @default(0) @map("failed_login_count")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -127,6 +129,7 @@ model Channel {
   tenant        Tenant         @relation(fields: [tenantId], references: [id])
   conversations Conversation[]
 
+  @@unique([type, externalId])
   @@index([tenantId])
   @@map("channels")
 }
@@ -134,6 +137,7 @@ model Channel {
 model Contact {
   id        String   @id @default(uuid())
   tenantId  String   @map("tenant_id")
+  legalHold Boolean @default(false) @map("legal_hold")
   waId      String   @map("wa_id") // numero de WhatsApp, sem formatacao (ex: 5531999999999)
   name      String?
   createdAt DateTime @default(now())
@@ -228,4 +232,27 @@ model Subscription {
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
   @@map("subscriptions")
+}
+
+model RateBucket {
+  key String @id
+  hits Int
+  expiresAt DateTime
+  @@index([expiresAt])
+  @@map("rate_buckets")
+}
+model AuditEvent {
+  id String @id @default(uuid())
+  tenantId String?
+  actorId String?
+  action String
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+  @@map("audit_events")
+}
+model ProviderEvent {
+  id String @id
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+  @@map("provider_events")
 }

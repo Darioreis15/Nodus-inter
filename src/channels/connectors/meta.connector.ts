@@ -1,3 +1,4 @@
+import { unseal } from '../../security/secrets';
 import { Injectable, BadGatewayException } from '@nestjs/common';
 import { ChannelRecord as Channel } from '../channel.types';
 import { ChannelConnector, OutboundTextMessage, SendResult } from './channel-connector.interface';
@@ -24,10 +25,11 @@ export class MetaConnector implements ChannelConnector {
     const response = await fetch(
       `https://graph.facebook.com/${GRAPH_API_VERSION}/${config.phoneNumberId}/messages`,
       {
+        signal: AbortSignal.timeout(10000),
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${config.accessToken}`,
+          Authorization: `Bearer ${unseal(config.accessToken, `meta:${config.phoneNumberId}`)}`,
         },
         body: JSON.stringify({
           messaging_product: 'whatsapp',
@@ -41,7 +43,7 @@ export class MetaConnector implements ChannelConnector {
     const data = await response.json();
     if (!response.ok) {
       throw new BadGatewayException(
-        `Falha ao enviar mensagem via Cloud API da Meta: ${JSON.stringify(data)}`,
+        `Falha ao enviar mensagem via Cloud API da Meta: HTTP ${response.status}`,
       );
     }
 

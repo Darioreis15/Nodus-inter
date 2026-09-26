@@ -1,4 +1,6 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { seal, unseal } from '../security/secrets';
+import { resolveWebhook, deliverWebhook } from '../security/safe-webhook';
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateWebhookSubscriptionDto, WebhookEvent } from './dto/create-webhook-subscription.dto';
@@ -10,9 +12,11 @@ export class OutboundWebhooksService {
   constructor(private prisma: PrismaService) {}
 
   async createForTenant(tenantId: string, dto: CreateWebhookSubscriptionDto) {
+    if (await this.prisma.webhookSubscription.count({ where: { tenantId, active: true } }) >= 10) throw new ForbiddenException('Limite de webhooks atingido.');
+    await resolveWebhook(dto.url);
     const secret = crypto.randomBytes(24).toString('hex');
     const subscription = await this.prisma.webhookSubscription.create({
-      data: { tenantId, url: dto.url, events: dto.events, secret },
+      data: { tenantId, url: dto.url, events: dto.events, secret: seal(secret, `webhook:${tenantId}`) },
     });
     // o secret so aparece aqui, na criacao -- depois disso nunca mais e devolvido
     return { ...subscription, secret };
@@ -34,7 +38,8 @@ export class OutboundWebhooksService {
     if (!sub) {
       throw new NotFoundException('Assinatura de webhook nao encontrada.');
     }
-    return this.prisma.webhookSubscription.update({ where: { id }, data: { active: false } });
+    await this.prisma.webhookSubscription.update({ where: { id }, data: { active: false } });
+    return { revoked: true };
   }
 
   /**
@@ -57,26 +62,20 @@ export class OutboundWebhooksService {
   }
 
   private async deliver(
-    sub: { id: string; url: string; secret: string },
+    sub: { id: string; tenantId: string; url: string; secret: string },
     event: WebhookEvent,
     payload: Record<string, unknown>,
   ) {
     const body = JSON.stringify({ event, data: payload });
-    const signature = crypto.createHmac('sha256', sub.secret).update(body).digest('hex');
-
     try {
-      const response = await fetch(sub.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Nodus-Event': event,
-          'X-Nodus-Signature': signature,
-        },
-        body,
+    const signature = crypto.createHmac('sha256', unseal(sub.secret, `webhook:${sub.tenantId}`)).update(body).digest('hex');
+
+      const status = await deliverWebhook(sub.url, body, {
+        'Content-Type': 'application/json', 'X-Nodus-Event': event, 'X-Nodus-Signature': signature,
       });
-      this.logger.log(`Webhook ${event} -> ${sub.url}: HTTP ${response.status}`);
+      this.logger.log(`Entrega webhook ${sub.id}: HTTP ${status}`);
     } catch (error) {
-      this.logger.warn(`Falha ao entregar webhook ${event} -> ${sub.url}: ${error}`);
+      this.logger.warn(`Falha ao entregar webhook ${sub.id}.`);
     }
   }
 }

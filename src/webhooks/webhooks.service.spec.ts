@@ -122,7 +122,7 @@ describe('WebhooksService', () => {
       });
 
       expect(prisma.message.updateMany).toHaveBeenCalledWith({
-        where: { externalId: 'wamid.1' },
+        where: { externalId: 'wamid.1', conversation: { channelId: 'channel-2' } },
         data: { status: 'DELIVERED' },
       });
     });

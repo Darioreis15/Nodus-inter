@@ -18,9 +18,12 @@ describe('ConversationsService', () => {
         update: jest.fn(),
         findMany: jest.fn(),
       },
-      message: { create: jest.fn().mockResolvedValue({ id: 'msg-default' }), findMany: jest.fn() },
+      message: { findFirst: jest.fn(), create: jest.fn().mockResolvedValue({ id: 'msg-default' }), findMany: jest.fn() },
       user: { findFirst: jest.fn() },
     };
+    prisma.$transaction = jest.fn((fn: any) => fn(prisma));
+    prisma.$queryRaw = jest.fn();
+    prisma.contact = { upsert: jest.fn().mockResolvedValue({ id: 'contact-1', waId: '5511999999999' }) };
     contacts = { findOrCreate: jest.fn() };
     evolutionConnector = { sendText: jest.fn() };
     metaConnector = { sendText: jest.fn() };

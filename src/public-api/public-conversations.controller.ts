@@ -12,14 +12,15 @@ export class PublicConversationsController {
   @Get()
   list(
     @CurrentApiTenant() tenantId: string,
+    @Query('cursor') cursor?: string,
     @Query('status') status?: 'OPEN' | 'PENDING' | 'RESOLVED',
   ) {
-    return this.conversationsService.listForTenant(tenantId, { status });
+    return this.conversationsService.listForTenant(tenantId, { status, cursor });
   }
 
   @Get(':id/messages')
-  listMessages(@CurrentApiTenant() tenantId: string, @Param('id') id: string) {
-    return this.conversationsService.listMessages(tenantId, id);
+  listMessages(@CurrentApiTenant() tenantId: string, @Param('id') id: string, @Query('cursor') cursor?: string) {
+    return this.conversationsService.listMessages(tenantId, id, cursor);
   }
 
   @Post(':id/messages')

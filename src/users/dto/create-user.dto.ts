@@ -1,7 +1,8 @@
-import { IsEmail, IsEnum, IsString, MinLength } from 'class-validator';
+import { MaxLength, IsEmail, IsEnum, IsString, MinLength } from 'class-validator';
 
 export class CreateUserDto {
   @IsString()
+  @MaxLength(4096)
   @MinLength(2)
   name: string;
 
