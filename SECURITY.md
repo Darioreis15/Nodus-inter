@@ -105,6 +105,31 @@ As rotas privacy de administrador e billing/status aceitam tenant suspenso com
 JWT valido. Login novo de inadimplente permanece bloqueado; solicitacoes LGPD
 podem ser recebidas por canal externo e executadas pelo operador.
 
+## Diagnostico temporario do proxy (homologacao)
+
+1. Publicar esta versao e configurar `ENABLE_PROXY_DIAGNOSTICS=true` no ambiente
+   do Web Service, com novo deploy. Nao alterar `TRUSTED_PROXY_CIDRS` por tentativa.
+2. No Postman desktop, fazer login como ADMIN e chamar
+   `GET /auth/proxy-diagnostics`, Authorization Bearer Token com o JWT do login.
+   Sem body. A rota continua sujeita aos limites e ao bloqueio de tenant/sessao.
+3. Anotar a resposta no Wi-Fi e repetir pelo hotspot celular. Usar o agente
+   local/desktop do Postman: um agente na nuvem nao testa a troca da rede local.
+   `effectiveIp` e o IP usado pelo limitador; `socketIp` e o par TCP direto;
+   `forwardedFor` e um header ainda nao confiavel; `trustedChain` reflete req.ips.
+   Headers e cadeia longos sao truncados, com indicadores na resposta.
+4. Repetir uma chamada com o header `X-Forwarded-For: 203.0.113.123`.
+   O IP forjado nao deve se tornar `effectiveIp`. Observacoes isoladas nao
+   autorizam confiar em um CIDR: confirmar a topologia e a sanitizacao de headers
+   com o provedor antes de configurar proxies e repetir os testes nas duas redes.
+   Os contadores, sozinhos, nao comprovam isolamento por IP.
+5. Remover a variavel ou configurar `ENABLE_PROXY_DIAGNOSTICS=false`, publicar
+   novamente e confirmar 404 com um JWT ADMIN valido. Nao guardar IPs completos
+   em tickets publicos; a resposta nao inclui tokens, cookies ou outros headers.
+
+A rota retorna 401 sem JWT valido e 403 para um AGENT autenticado. Para ADMIN
+autorizado, retorna 404 quando desativada e 200 quando habilitada. Os headers de
+seguranca e `Cache-Control: no-store` permanecem aplicados.
+
 ## Direitos e retencao
 
 - GET /privacy/contacts/:id?cursor=...: admin, exportacao paginada de contato e
