@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional, IsString } from 'class-validator';
+import { MaxLength, IsBoolean, IsOptional, IsString } from 'class-validator';
 
 export class UpdateAutoReplyDto {
   @IsBoolean()
@@ -6,5 +6,6 @@ export class UpdateAutoReplyDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(4096)
   message?: string;
 }

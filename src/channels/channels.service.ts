@@ -1,4 +1,6 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { validateMetaToken } from './connectors/meta-api';
+import { seal } from '../security/secrets';
+import { ForbiddenException, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ChannelRecord as Channel } from './channel.types';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -39,7 +41,9 @@ export class ChannelsService {
     }
 
     if (dto.type === ChannelTypeDto.OFFICIAL_META) {
+      await validateMetaToken(dto.phoneNumberId!, dto.accessToken!);
       return this.prisma.channel.create({
+        select: { id: true, name: true, type: true, status: true },
         data: {
           tenantId,
           type: 'OFFICIAL_META',
@@ -48,7 +52,7 @@ export class ChannelsService {
           externalId: dto.phoneNumberId,
           config: {
             phoneNumberId: dto.phoneNumberId,
-            accessToken: dto.accessToken,
+            accessToken: seal(dto.accessToken!, `meta:${dto.phoneNumberId}`),
             wabaId: dto.wabaId,
           },
         },
@@ -96,12 +100,31 @@ export class ChannelsService {
     return this.evolutionConnector.getQrCode(config.instanceName);
   }
 
+  async updateMetaToken(tenantId: string, channelId: string, accessToken: string) {
+    const channel = await this.findOwnedChannel(tenantId, channelId);
+    if (channel.type !== 'OFFICIAL_META') {
+      throw new BadRequestException('Atualizacao de token disponivel apenas para canais OFFICIAL_META.');
+    }
+    const config = channel.config as Record<string, any>;
+    if (!channel.externalId || !config || config.phoneNumberId !== channel.externalId) {
+      throw new BadRequestException('Configuracao do numero Meta inconsistente.');
+    }
+    await validateMetaToken(channel.externalId, accessToken);
+    await this.prisma.channel.update({
+      where: { id: channelId, tenantId },
+      data: { config: { ...config, accessToken: seal(accessToken, `meta:${channel.externalId}`) } },
+      select: { id: true },
+    });
+    return { id: channelId, tokenUpdated: true };
+  }
+
   async updateAutoReply(tenantId: string, channelId: string, enabled: boolean, message?: string) {
     await this.findOwnedChannel(tenantId, channelId);
     if (enabled && !message) {
       throw new ForbiddenException('Informe a mensagem de resposta automatica pra habilitar.');
     }
     return this.prisma.channel.update({
+      select: { id: true, name: true, autoReplyEnabled: true, autoReplyMessage: true },
       where: { id: channelId },
       data: { autoReplyEnabled: enabled, autoReplyMessage: enabled ? message : null },
     });

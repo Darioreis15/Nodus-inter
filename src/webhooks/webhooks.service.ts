@@ -1,3 +1,4 @@
+import { metaErrorInfo } from '../channels/connectors/meta-api';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConversationsService } from '../conversations/conversations.service';
@@ -41,7 +42,6 @@ export class WebhooksService {
 
       const text = raw?.message?.conversation ?? raw?.message?.extendedTextMessage?.text ?? '';
       const from = String(raw?.key?.remoteJid ?? '').split('@')[0];
-      this.logger.log(`[Evolution] mensagem recebida de ${from}: "${text}"`);
 
       await this.conversations.recordInboundMessage(
         channel,
@@ -81,7 +81,6 @@ export class WebhooksService {
         this.logger.log(`[Meta] evento casado com o canal ${channel.id} (phone_number_id ${phoneNumberId})`);
 
         for (const message of value?.messages ?? []) {
-          this.logger.log(`[Meta] mensagem recebida de ${message.from}: "${message.text?.body ?? ''}"`);
           await this.conversations.recordInboundMessage(
             channel,
             message.from,
@@ -93,8 +92,14 @@ export class WebhooksService {
 
         for (const status of value?.statuses ?? []) {
           this.logger.log(`[Meta] status update: mensagem ${status.id} -> ${status.status}`);
+          if (status.status === 'failed') {
+            for (const error of (Array.isArray(status.errors) ? status.errors.slice(0, 5) : [])) {
+              const info = metaErrorInfo(error);
+              this.logger.warn(`[Meta] falha de entrega: codigo=${info.code ?? 'desconhecido'} subcodigo=${info.subcode ?? '-'}; ${info.message}`);
+            }
+          }
           await this.prisma.message.updateMany({
-            where: { externalId: status.id },
+            where: { externalId: status.id, conversation: { channelId: channel.id } },
             data: { status: this.mapMetaStatus(status.status) },
           });
         }

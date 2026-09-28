@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { LoginDto } from './dto/login.dto';
@@ -51,7 +51,7 @@ export class AuthService {
       slug = `${baseSlug}-${suffix}`;
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const passwordHash = await bcrypt.hash(dto.password, 12);
 
     const tenant = await this.prisma.tenant.create({
       data: {
@@ -83,15 +83,18 @@ export class AuthService {
       include: { tenant: { select: { status: true } } },
     });
     if (!user) {
+      await bcrypt.compare(dto.password, '$2b$12$abcdefghijklmnopqrstuu0nP8uVhUN9Kau3QyTUFXKYmo20DY/yG');
       throw new UnauthorizedException('Credenciais invalidas.');
     }
 
+    if (user.lockedUntil && user.lockedUntil > new Date()) throw new UnauthorizedException('Credenciais invalidas ou acesso temporariamente bloqueado.');
     const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
     if (!passwordMatches) {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { failedLoginCount: { increment: 1 } },
-      });
+      await this.prisma.$executeRaw`
+        UPDATE users SET failed_login_count = CASE WHEN locked_until <= NOW() THEN 1 ELSE failed_login_count + 1 END,
+        locked_until = CASE WHEN locked_until <= NOW() THEN NULL
+          WHEN failed_login_count + 1 >= 5 THEN NOW() + INTERVAL '15 minutes' ELSE locked_until END
+        WHERE id = ${user.id}`;
       throw new UnauthorizedException('Credenciais invalidas.');
     }
 
@@ -104,11 +107,11 @@ export class AuthService {
     if (user.failedLoginCount > 0) {
       await this.prisma.user.update({
         where: { id: user.id },
-        data: { failedLoginCount: 0 },
+        data: { failedLoginCount: 0, lockedUntil: null },
       });
     }
 
-    const accessToken = this.issueToken(user.id, user.tenantId, user.role, user.email);
+    const accessToken = this.issueToken(user.id, user.tenantId, user.role, user.email, user.tokenVersion);
 
     return {
       accessToken,
@@ -125,13 +128,18 @@ export class AuthService {
       throw new UnauthorizedException('Senha atual incorreta.');
     }
 
-    const newPasswordHash = await bcrypt.hash(dto.newPassword, 10);
+    const newPasswordHash = await bcrypt.hash(dto.newPassword, 12);
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash: newPasswordHash, mustChangePassword: false },
+      data: { passwordHash: newPasswordHash, mustChangePassword: false, tokenVersion: { increment: 1 } },
     });
 
     return { message: 'Senha atualizada com sucesso.' };
+  }
+
+  async logoutAll(user: AuthenticatedUser) {
+    await this.prisma.user.update({ where: { id: user.userId }, data: { tokenVersion: { increment: 1 } } });
+    return { revoked: true };
   }
 
   async me(authUser: AuthenticatedUser) {
@@ -151,8 +159,8 @@ export class AuthService {
     };
   }
 
-  private issueToken(userId: string, tenantId: string, role: string, email: string): string {
-    return this.jwt.sign({ sub: userId, tenantId, role, email });
+  private issueToken(userId: string, tenantId: string, role: string, email: string, ver: number): string {
+    return this.jwt.sign({ sub: userId, tenantId, role, email, ver });
   }
 
   private toPublicUser(user: {

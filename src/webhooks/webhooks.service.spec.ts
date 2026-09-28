@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 import { WebhooksService } from './webhooks.service';
 
 describe('WebhooksService', () => {
@@ -103,6 +103,25 @@ describe('WebhooksService', () => {
       );
     });
 
+    it('registra codigo de falha sem expor texto bruto e limita a atualizacao ao canal', async () => {
+      prisma.channel.findFirst.mockResolvedValue({ id: 'channel-2' });
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+      try {
+        await service.handleMetaEvent({ entry: [{ changes: [{ value: {
+          metadata: { phone_number_id: '123' },
+          statuses: [{ id: 'wamid.failed', status: 'failed', errors: [
+            { code: 130497, message: 'SECRET', error_data: { details: 'PHONE' } },
+          ] }],
+        } }] }] });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('codigo=130497'));
+        expect(JSON.stringify(warn.mock.calls)).not.toMatch(/SECRET|PHONE/);
+        expect(prisma.message.updateMany).toHaveBeenCalledWith({
+          where: { externalId: 'wamid.failed', conversation: { channelId: 'channel-2' } },
+          data: { status: 'FAILED' },
+        });
+      } finally { warn.mockRestore(); }
+    });
+
     it('atualiza status de mensagem enviada quando recebe um status update', async () => {
       prisma.channel.findFirst.mockResolvedValue({ id: 'channel-2' });
 
@@ -122,7 +141,7 @@ describe('WebhooksService', () => {
       });
 
       expect(prisma.message.updateMany).toHaveBeenCalledWith({
-        where: { externalId: 'wamid.1' },
+        where: { externalId: 'wamid.1', conversation: { channelId: 'channel-2' } },
         data: { status: 'DELIVERED' },
       });
     });

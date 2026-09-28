@@ -1,5 +1,5 @@
 import { UnauthorizedException, ConflictException, ForbiddenException } from '@nestjs/common';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
@@ -9,6 +9,7 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     prisma = {
+      $executeRaw: jest.fn(),
       user: {
         findUnique: jest.fn(),
         findUniqueOrThrow: jest.fn(),
@@ -103,10 +104,7 @@ describe('AuthService', () => {
         service.login({ email: 'admin@demo.nodus.dev', password: 'senha-errada' }),
       ).rejects.toBeInstanceOf(UnauthorizedException);
 
-      expect(prisma.user.update).toHaveBeenCalledWith({
-        where: { id: 'user-1' },
-        data: { failedLoginCount: { increment: 1 } },
-      });
+      expect(prisma.$executeRaw).toHaveBeenCalled();
     });
 
     it('retorna token e mustChangePassword na senha correta', async () => {

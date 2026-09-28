@@ -8,6 +8,7 @@ import { ConversationRecord } from './conversation.types';
 import { OutboundWebhooksService } from '../outbound-webhooks/outbound-webhooks.service';
 
 interface ListFilters {
+  cursor?: string;
   status?: 'OPEN' | 'PENDING' | 'RESOLVED';
   assignedUserId?: string;
 }
@@ -45,39 +46,32 @@ export class ConversationsService {
     externalId: string | undefined,
     raw: unknown,
   ) {
-    const contact = await this.contacts.findOrCreate(channel.tenantId, fromNumber);
-
-    let conversation = await this.prisma.conversation.findFirst({
-      where: { channelId: channel.id, contactId: contact.id, status: { in: ['OPEN', 'PENDING'] } },
-      orderBy: { updatedAt: 'desc' },
-    });
-    let isNewConversation = false;
-
-    if (!conversation) {
-      conversation = await this.prisma.conversation.create({
-        data: { channelId: channel.id, contactId: contact.id, status: 'OPEN' },
+    const saved = await this.prisma.$transaction(async tx => {
+      // Serializa a recepcao por canal para deduplicar mensagens concorrentes.
+      await tx.$queryRaw`SELECT id FROM channels WHERE id = ${channel.id} FOR UPDATE`;
+      if (externalId) {
+        const duplicate = await tx.message.findFirst({ where: { externalId, conversation: { channelId: channel.id } } });
+        if (duplicate) return { duplicate: true as const, conversation: await tx.conversation.findUniqueOrThrow({ where: { id: duplicate.conversationId } }) };
+      }
+      const contact = await tx.contact.upsert({
+        where: { tenantId_waId: { tenantId: channel.tenantId, waId: fromNumber } },
+        create: { tenantId: channel.tenantId, waId: fromNumber }, update: {},
       });
-      isNewConversation = true;
-    } else if (conversation.status === 'PENDING') {
-      // mensagem nova do cliente enquanto esperava resposta -> volta pra fila de abertas
-      conversation = await this.prisma.conversation.update({
-        where: { id: conversation.id },
-        data: { status: 'OPEN' },
+      let conversation = await tx.conversation.findFirst({
+        where: { channelId: channel.id, contactId: contact.id, status: { in: ['OPEN', 'PENDING'] } },
+        orderBy: { updatedAt: 'desc' },
       });
-    }
-
-    const message = await this.prisma.message.create({
-      data: {
-        conversationId: conversation.id,
-        direction: 'INBOUND',
-        externalId,
-        fromNumber,
-        toNumber: channel.externalId ?? 'desconhecido',
-        body: text,
-        status: 'RECEIVED',
-        raw: raw as any,
-      },
+      const isNewConversation = !conversation;
+      if (!conversation) conversation = await tx.conversation.create({ data: { channelId: channel.id, contactId: contact.id, status: 'OPEN' } });
+      else if (conversation.status === 'PENDING') conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { status: 'OPEN' } });
+      const message = await tx.message.create({ data: {
+        conversationId: conversation.id, direction: 'INBOUND', externalId,
+        fromNumber, toNumber: channel.externalId ?? 'desconhecido', body: text, status: 'RECEIVED',
+      } });
+      return { duplicate: false as const, conversation, contact, message, isNewConversation };
     });
+    if (saved.duplicate) return saved.conversation;
+    const { conversation, contact, message, isNewConversation } = saved;
 
     // Nao espera a entrega do webhook -- um destino de terceiro fora do ar
     // nunca pode atrasar ou quebrar o recebimento da mensagem em si.
@@ -128,15 +122,17 @@ export class ConversationsService {
     const conversations = await this.prisma.conversation.findMany({
       where: {
         channel: { tenantId },
+        ...(filters.cursor ? { id: { gt: filters.cursor } } : {}),
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.assignedUserId ? { assignedUserId: filters.assignedUserId } : {}),
       },
       include: {
         contact: true,
         channel: { select: { id: true, name: true, type: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, direction: true, body: true, status: true, createdAt: true, fromNumber: true, toNumber: true } },
       },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { id: 'asc' },
+      take: 100,
     });
 
     return conversations.map((c: (typeof conversations)[number]) => ({
@@ -188,11 +184,13 @@ export class ConversationsService {
     return this.prisma.conversation.update({ where: { id: conversationId }, data: { status } });
   }
 
-  async listMessages(tenantId: string, conversationId: string) {
+  async listMessages(tenantId: string, conversationId: string, cursor?: string) {
     await this.findOwnedConversation(tenantId, conversationId);
     return this.prisma.message.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: 'asc' },
+      where: { conversationId, ...(cursor ? { id: { gt: cursor } } : {}) },
+      orderBy: { id: 'asc' },
+      take: 100,
+      select: { id: true, direction: true, body: true, status: true, createdAt: true, fromNumber: true, toNumber: true },
     });
   }
 

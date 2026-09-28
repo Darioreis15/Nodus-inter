@@ -1,6 +1,7 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 
 export interface AuthenticatedUser {
+  mustChangePassword?: boolean;
   userId: string;
   tenantId: string;
   role: 'ADMIN' | 'AGENT';

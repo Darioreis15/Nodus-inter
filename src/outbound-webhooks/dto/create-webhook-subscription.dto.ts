@@ -4,7 +4,7 @@ export const WEBHOOK_EVENTS = ['message.received', 'conversation.assigned'] as c
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 export class CreateWebhookSubscriptionDto {
-  @IsUrl({ require_tld: false }) // require_tld: false permite testar com IP/localhost
+  @IsUrl({ protocols: ['https'], require_protocol: true })
   url: string;
 
   @IsArray()

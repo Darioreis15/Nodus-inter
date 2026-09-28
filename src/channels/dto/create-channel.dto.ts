@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
+import { MaxLength, IsEnum, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
 
 export enum ChannelTypeDto {
   QR_EVOLUTION = 'QR_EVOLUTION',
@@ -7,6 +7,7 @@ export enum ChannelTypeDto {
 
 export class CreateChannelDto {
   @IsString()
+  @MaxLength(4096)
   @MinLength(2)
   name: string;
 
@@ -16,13 +17,16 @@ export class CreateChannelDto {
   // Obrigatorios apenas quando type = OFFICIAL_META
   @ValidateIf((dto) => dto.type === ChannelTypeDto.OFFICIAL_META)
   @IsString()
+  @MaxLength(4096)
   phoneNumberId?: string;
 
   @ValidateIf((dto) => dto.type === ChannelTypeDto.OFFICIAL_META)
   @IsString()
+  @MaxLength(4096)
   accessToken?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(4096)
   wabaId?: string;
 }

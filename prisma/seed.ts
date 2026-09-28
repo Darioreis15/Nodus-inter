@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
@@ -28,6 +28,9 @@ async function main() {
     },
   });
 
+  if (process.env.CREATE_DEMO !== 'true') return;
+  const demoPassword = process.env.DEMO_PASSWORD;
+  if (!demoPassword || demoPassword.length < 16) throw new Error('Configure DEMO_PASSWORD forte.');
   const existingDemo = await prisma.tenant.findUnique({ where: { slug: 'demo' } });
   if (!existingDemo) {
     const demoTenant = await prisma.tenant.create({
@@ -38,7 +41,7 @@ async function main() {
       },
     });
 
-    const passwordHash = await bcrypt.hash('trocar123', 10);
+    const passwordHash = await bcrypt.hash(demoPassword, 12);
     await prisma.user.create({
       data: {
         tenantId: demoTenant.id,
@@ -50,7 +53,7 @@ async function main() {
       },
     });
 
-    console.log('Tenant demo criado: admin@demo.nodus.dev / trocar123 (troca obrigatoria no 1o login)');
+    console.log('Tenant demo criado com troca obrigatoria de senha.');
   }
 }
 

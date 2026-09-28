@@ -1,9 +1,11 @@
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { configureHttp } from './security/bootstrap';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -11,7 +13,7 @@ async function bootstrap() {
       transform: true,
     }),
   );
-  app.enableCors();
+  configureHttp(app);
 
   // Log toda requisicao que chega -- ajuda a ver nos logs do Render se um
   // webhook (Evolution/Meta) ou uma chamada do Postman esta de fato batendo

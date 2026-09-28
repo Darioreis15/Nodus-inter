@@ -1,3 +1,4 @@
+import { RateGuard } from '../../security/rate.guard';
 import { Controller, Get, INestApplication, UseGuards } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
@@ -26,10 +27,10 @@ describe('Acesso HTTP de tenants suspensos', () => {
   let app: INestApplication;
   let token: string;
   let status: string | null;
-  const prisma = { tenant: { findUnique: jest.fn() } };
+  const prisma = { user: { findFirst: jest.fn() }, tenant: { findUnique: jest.fn() } };
   const apiKeys = { resolveTenantId: jest.fn() };
   const billing = { getStatus: jest.fn(), subscribe: jest.fn() };
-  const secret = process.env.JWT_SECRET || 'troque-por-um-segredo-forte-em-producao';
+  const secret = process.env.JWT_SECRET!;
 
   beforeAll(async () => {
     const module = await Test.createTestingModule({
@@ -37,6 +38,7 @@ describe('Acesso HTTP de tenants suspensos', () => {
       controllers: [OperationsController, BillingController],
       providers: [
         JwtStrategy,
+        { provide: RateGuard, useValue: { consume: jest.fn() } },
         { provide: PrismaService, useValue: prisma },
         { provide: ApiKeysService, useValue: apiKeys },
         { provide: BillingService, useValue: billing },
@@ -46,13 +48,14 @@ describe('Acesso HTTP de tenants suspensos', () => {
     app.useLogger(false);
     await app.init();
     token = new JwtService({ secret }).sign({
-      sub: 'user-1', tenantId: 'tenant-1', role: 'ADMIN', email: 'test@example.com',
-    }, { expiresIn: '1h' });
+      ver: 0, sub: 'user-1', tenantId: 'tenant-1', role: 'ADMIN', email: 'test@example.com',
+    }, { expiresIn: '1h', issuer: 'nodus', audience: 'nodus-api' });
   });
 
   beforeEach(() => {
     jest.clearAllMocks();
     status = 'ACTIVE';
+    prisma.user.findFirst.mockResolvedValue({ tokenVersion: 0, role: 'ADMIN', email: 'test@example.com', mustChangePassword: false });
     prisma.tenant.findUnique.mockImplementation(async () => status ? { status } : null);
     apiKeys.resolveTenantId.mockImplementation(async (key: string) => key === 'valid-key' ? 'tenant-1' : null);
     billing.getStatus.mockImplementation(async () => ({ tenantStatus: status }));

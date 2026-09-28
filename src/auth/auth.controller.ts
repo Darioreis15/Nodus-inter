@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { SetMetadata, Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { LoginDto } from './dto/login.dto';
@@ -21,9 +21,17 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @SetMetadata('allowPasswordChange', true)
   @Post('change-password')
   changePassword(@CurrentUser() user: AuthenticatedUser, @Body() dto: ChangePasswordDto) {
     return this.authService.changePassword(user, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @SetMetadata('allowPasswordChange', true)
+  @Post('logout-all')
+  logoutAll(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.logoutAll(user);
   }
 
   @UseGuards(JwtAuthGuard)

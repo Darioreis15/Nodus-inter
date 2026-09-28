@@ -22,6 +22,7 @@ export class AsaasClient {
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
+      signal: AbortSignal.timeout(10000),
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'NodusWhatsappSaas/1.0',
@@ -32,9 +33,13 @@ export class AsaasClient {
 
     const data = await response.json().catch(() => null);
     if (!response.ok) {
-      throw new BadGatewayException(`Erro na API do Asaas: ${JSON.stringify(data)}`);
+      throw new BadGatewayException(`Erro na API do Asaas: HTTP ${response.status}`);
     }
     return data as T;
+  }
+
+  cancelSubscription(id: string) {
+    return this.request(`/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   createCustomer(input: { name: string; cpfCnpj: string; email?: string }) {
@@ -58,9 +63,9 @@ export class AsaasClient {
     });
   }
 
-  getSubscriptionPayments(subscriptionId: string) {
+  getSubscriptionPayments(subscriptionId: string, status?: string) {
     return this.request<{ data: Array<{ id: string; invoiceUrl: string; status: string }> }>(
-      `/subscriptions/${subscriptionId}/payments`,
+      `/subscriptions/${encodeURIComponent(subscriptionId)}/payments?limit=1${status ? `&status=${encodeURIComponent(status)}` : ""}`,
     );
   }
 }

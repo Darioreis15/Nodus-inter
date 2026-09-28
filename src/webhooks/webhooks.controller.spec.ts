@@ -24,9 +24,9 @@ describe('WebhooksController Asaas', () => {
     expect(billing.handlePaymentEvent).toHaveBeenCalledWith(payload.event, payload);
   });
 
-  it('aceita query legada quando nao ha header', async () => {
-    await controller.handleAsaas(undefined, 'test-webhook-secret', payload);
-    expect(billing.handlePaymentEvent).toHaveBeenCalledTimes(1);
+  it('rejeita query legada quando nao ha header', () => {
+    expect(() => controller.handleAsaas(undefined, 'test-webhook-secret', payload)).toThrow(UnauthorizedException);
+    expect(billing.handlePaymentEvent).not.toHaveBeenCalled();
   });
 
   it.each([undefined, '', 'incorrect-token'])('rejeita token ausente ou invalido: %s', (token) => {

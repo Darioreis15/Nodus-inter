@@ -1,11 +1,14 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { PasswordBytes } from '../../security/password';
+import { MaxLength, IsEmail, IsString, MinLength } from 'class-validator';
 
 export class RegisterTenantDto {
   @IsString()
+  @MaxLength(4096)
   @MinLength(2)
   companyName: string;
 
   @IsString()
+  @MaxLength(4096)
   @MinLength(2)
   adminName: string;
 
@@ -13,6 +16,8 @@ export class RegisterTenantDto {
   adminEmail: string;
 
   @IsString()
-  @MinLength(8)
+  @MaxLength(4096)
+  @MinLength(12)
+  @PasswordBytes()
   password: string;
 }

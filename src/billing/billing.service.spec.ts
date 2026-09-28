@@ -11,6 +11,10 @@ describe('BillingService', () => {
       subscription: { findUnique: jest.fn(), create: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
       tenant: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
     };
+    prisma.$transaction = jest.fn((fn: any) => fn(prisma));
+    prisma.$queryRaw = jest.fn();
+    prisma.auditEvent = { create: jest.fn() };
+    prisma.providerEvent = { findUnique: jest.fn(), create: jest.fn() };
     asaas = {
       createCustomer: jest.fn(),
       createSubscription: jest.fn(),
@@ -75,6 +79,7 @@ describe('BillingService', () => {
     it('ativa o tenant quando o pagamento e confirmado', async () => {
       prisma.subscription.findFirst.mockResolvedValue({ id: 'sub-1', tenantId: 'tenant-1' });
 
+      asaas.getSubscriptionPayments.mockImplementation((_id: string, status: string) => Promise.resolve({ data: status === 'CONFIRMED' ? [{ id: 'pay_test' }] : [] }));
       await service.handlePaymentEvent('PAYMENT_CONFIRMED', {
         payment: { subscription: 'sub_asaas_123' },
       });
@@ -91,6 +96,7 @@ describe('BillingService', () => {
     it('suspende o tenant quando o pagamento vence', async () => {
       prisma.subscription.findFirst.mockResolvedValue({ id: 'sub-1', tenantId: 'tenant-1' });
 
+      asaas.getSubscriptionPayments.mockImplementation((_id: string, status: string) => Promise.resolve({ data: status === 'OVERDUE' ? [{ id: 'pay_test' }] : [] }));
       await service.handlePaymentEvent('PAYMENT_OVERDUE', {
         payment: { subscription: 'sub_asaas_123' },
       });

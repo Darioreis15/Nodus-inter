@@ -14,18 +14,19 @@ export class ConversationsController {
   @Get()
   list(
     @CurrentUser() user: AuthenticatedUser,
+    @Query('cursor') cursor?: string,
     @Query('status') status?: 'OPEN' | 'PENDING' | 'RESOLVED',
     @Query('mine') mine?: string,
   ) {
     return this.conversationsService.listForTenant(user.tenantId, {
-      status,
+      status, cursor,
       assignedUserId: mine === 'true' ? user.userId : undefined,
     });
   }
 
   @Get(':id/messages')
-  listMessages(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.conversationsService.listMessages(user.tenantId, id);
+  listMessages(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Query('cursor') cursor?: string) {
+    return this.conversationsService.listMessages(user.tenantId, id, cursor);
   }
 
   @Post(':id/messages')

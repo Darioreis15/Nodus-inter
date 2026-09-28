@@ -41,30 +41,32 @@ export class EvolutionConnector implements ChannelConnector {
    */
   async createInstance(instanceName: string, webhookUrl: string): Promise<void> {
     const response = await fetch(`${this.baseUrl}/instance/create`, {
+      signal: AbortSignal.timeout(10000),
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: this.globalApiKey },
       body: JSON.stringify({
         instanceName,
         qrcode: true,
         integration: 'WHATSAPP-BAILEYS',
-        webhook: { url: webhookUrl, events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'] },
+        webhook: { enabled: true, headers: { 'x-evolution-token': process.env.EVOLUTION_WEBHOOK_TOKEN }, url: webhookUrl, events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'] },
       }),
     });
 
     if (!response.ok) {
       const detail = await response.text();
-      throw new BadGatewayException(`Falha ao criar instancia na Evolution API: ${detail}`);
+      throw new BadGatewayException(`Falha ao criar instancia na Evolution API: HTTP ${response.status}`);
     }
   }
 
   async getQrCode(instanceName: string): Promise<{ base64?: string; status: string }> {
     const response = await fetch(`${this.baseUrl}/instance/connect/${instanceName}`, {
+      signal: AbortSignal.timeout(10000),
       headers: { apikey: this.globalApiKey },
     });
 
     if (!response.ok) {
       const detail = await response.text();
-      throw new BadGatewayException(`Falha ao buscar QR code: ${detail}`);
+      throw new BadGatewayException(`Falha ao buscar QR code: HTTP ${response.status}`);
     }
 
     const data = await response.json();
@@ -73,6 +75,7 @@ export class EvolutionConnector implements ChannelConnector {
 
   async deleteInstance(instanceName: string): Promise<void> {
     const response = await fetch(`${this.baseUrl}/instance/delete/${instanceName}`, {
+      signal: AbortSignal.timeout(10000),
       method: 'DELETE',
       headers: { apikey: this.globalApiKey },
     });
@@ -80,13 +83,14 @@ export class EvolutionConnector implements ChannelConnector {
     // (por exemplo, se ela nunca terminou de conectar) -- nao e erro de verdade.
     if (!response.ok && response.status !== 404) {
       const detail = await response.text();
-      throw new BadGatewayException(`Falha ao deletar instancia na Evolution API: ${detail}`);
+      throw new BadGatewayException(`Falha ao deletar instancia na Evolution API: HTTP ${response.status}`);
     }
   }
 
   async sendText(channel: Channel, message: OutboundTextMessage): Promise<SendResult> {
     const config = channel.config as unknown as EvolutionConfig;
     const response = await fetch(`${this.baseUrl}/message/sendText/${config.instanceName}`, {
+      signal: AbortSignal.timeout(10000),
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: this.globalApiKey },
       body: JSON.stringify({ number: message.to, text: message.text }),
@@ -94,7 +98,7 @@ export class EvolutionConnector implements ChannelConnector {
 
     if (!response.ok) {
       const detail = await response.text();
-      throw new BadGatewayException(`Falha ao enviar mensagem via Evolution API: ${detail}`);
+      throw new BadGatewayException(`Falha ao enviar mensagem via Evolution API: HTTP ${response.status}`);
     }
 
     const data = await response.json();

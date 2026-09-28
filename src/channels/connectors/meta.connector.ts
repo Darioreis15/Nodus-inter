@@ -1,3 +1,5 @@
+import { metaRequest } from './meta-api';
+import { unseal } from '../../security/secrets';
 import { Injectable, BadGatewayException } from '@nestjs/common';
 import { ChannelRecord as Channel } from '../channel.types';
 import { ChannelConnector, OutboundTextMessage, SendResult } from './channel-connector.interface';
@@ -8,7 +10,6 @@ interface MetaConfig {
   wabaId?: string;
 }
 
-const GRAPH_API_VERSION = 'v20.0';
 
 /**
  * Cliente para a Cloud API oficial da Meta. Diferente da Evolution API,
@@ -21,30 +22,14 @@ export class MetaConnector implements ChannelConnector {
   async sendText(channel: Channel, message: OutboundTextMessage): Promise<SendResult> {
     const config = channel.config as unknown as MetaConfig;
 
-    const response = await fetch(
-      `https://graph.facebook.com/${GRAPH_API_VERSION}/${config.phoneNumberId}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${config.accessToken}`,
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: message.to,
-          type: 'text',
-          text: { body: message.text },
-        }),
-      },
+    const data = await metaRequest(
+      `${encodeURIComponent(config.phoneNumberId)}/messages`,
+      unseal(config.accessToken, `meta:${config.phoneNumberId}`),
+      { messaging_product: 'whatsapp', to: message.to, type: 'text', text: { body: message.text } },
     );
-
-    const data = await response.json();
-    if (!response.ok) {
-      throw new BadGatewayException(
-        `Falha ao enviar mensagem via Cloud API da Meta: ${JSON.stringify(data)}`,
-      );
+    if (typeof data?.messages?.[0]?.id !== 'string' || !data.messages[0].id) {
+      throw new BadGatewayException('Resposta da Meta sem identificador da mensagem. Entrega nao confirmada.');
     }
-
-    return { externalId: data.messages?.[0]?.id ?? `meta-${Date.now()}` };
+    return { externalId: data.messages[0].id };
   }
 }
