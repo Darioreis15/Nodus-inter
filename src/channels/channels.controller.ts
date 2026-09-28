@@ -5,6 +5,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ChannelsService } from './channels.service';
 import { CreateChannelDto } from './dto/create-channel.dto';
+import { UpdateMetaTokenDto } from './dto/update-meta-token.dto';
 import { UpdateAutoReplyDto } from './dto/update-auto-reply.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -28,6 +29,16 @@ export class ChannelsController {
   @Get(':id/qrcode')
   getQrCode(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.channelsService.getQrCode(user.tenantId, id);
+  }
+
+  @Roles('ADMIN')
+  @Patch(':id/meta-token')
+  updateMetaToken(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateMetaTokenDto,
+  ) {
+    return this.channelsService.updateMetaToken(user.tenantId, id, dto.accessToken);
   }
 
   @Roles('ADMIN')
