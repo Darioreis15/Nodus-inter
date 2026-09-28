@@ -243,3 +243,20 @@ numerico e descricao segura. Um ID de mensagem ou status SENT comprova aceitacao
 nao entrega; conferir DELIVERED/READ ou o aparelho. O erro 130497 informa restricao
 geografica do provedor; renovar o token nao a remove. O recebimento em homologacao
 foi confirmado, mas a entrega de saida permanece pendente no ambiente real.
+
+### Previa completa da retencao
+
+Mantenha `APPLY_RETENTION=false` e execute `npm run privacy:retention`.
+O resultado `DRY_RUN` nao modifica dados e mostra contagens separadas de:
+mensagens antigas, payloads `raw` em mensagens que permanecerao, contadores
+expirados, eventos de provedores com mais de 90 dias e auditorias fora do
+prazo `AUDIT_RETENTION_DAYS`. As datas de corte aparecem em UTC.
+Mensagens e payloads de contatos com `legalHold=true` sao preservados.
+Auditorias e eventos de provedores nao possuem essa protecao por contato:
+revise obrigacoes de preservacao antes de autorizar a execucao.
+
+A previa e a aplicacao usam os mesmos filtros; contagens podem mudar entre
+execucoes devido a novas gravacoes e ao tempo decorrido. Em `APPLIED`, as
+contagens representam linhas realmente afetadas. As operacoes sao sequenciais,
+sem transacao global: uma falha pode ocorrer apos etapas ja concluidas.
+Este comando nao cria um agendamento e nao altera copias em backups ou provedores.
