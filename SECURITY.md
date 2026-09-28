@@ -206,3 +206,40 @@ Fontes para revisao pelo responsavel:
   Isso nao comprova ausencia de falhas no software nem inclui dependencias dev.
 - Nao executados no ambiente publicado: restore, migracao, criptografia,
   exclusoes, teste dos IPs reais atras do proxy ou integracao dos provedores.
+
+## Atualizar token de um canal Meta sem apagar conversas
+
+Apos o deploy desta alteracao, o administrador autenticado pode executar:
+
+```http
+PATCH /channels/ID_DO_CANAL/meta-token
+Authorization: Bearer JWT_ADMIN_DO_NODUS
+Content-Type: application/json
+
+{"accessToken":"NOVO_TOKEN_DE_ACESSO_DA_META"}
+```
+
+A resposta e `{"id":"ID_DO_CANAL","tokenUpdated":true}`. O JWT do Nodus vai no
+header; o token de acesso da Meta vai somente no corpo. Nao usar META_VERIFY_TOKEN
+ou META_APP_SECRET nesse campo. Nao publicar capturas contendo o corpo da requisicao.
+
+O backend confirma o acesso ao Phone Number ID ja associado ao canal e so entao
+substitui o token, criptografando com a DATA_ENCRYPTION_KEY existente. Se a validacao
+falhar, a credencial anterior e preservada. A verificacao de leitura do numero nao
+comprova permissao de envio nem entrega: testar a resposta na conversa depois.
+Somente ADMIN do mesmo tenant pode atualizar; outro tenant recebe 404 e AGENT 403.
+O endpoint nao troca numero, WABA, status, conversas ou mensagens. Nao recriar o canal
+nem gravar tokens em texto puro pelo pgAdmin. Nao requer seed, db push ou migration.
+
+Cadastro, rotacao e envio usam Graph API v25.0, a versao exercitada na homologacao.
+Gerar um token no painel Meta nao atualiza automaticamente o token salvo no Nodus.
+Erros HTTP retornam 502 com provider=META, providerStatus e os codigos numericos
+providerCode/providerSubcode quando disponiveis. Textos brutos da Meta nao sao
+expostos: mensagens locais explicam os codigos conhecidos. Falhas de rede nao sao
+repetidas automaticamente, pois o provedor pode ja ter aceitado o envio.
+
+Erros assincronos continuam chegando pelo webhook: status FAILED e log com codigo
+numerico e descricao segura. Um ID de mensagem ou status SENT comprova aceitacao,
+nao entrega; conferir DELIVERED/READ ou o aparelho. O erro 130497 informa restricao
+geografica do provedor; renovar o token nao a remove. O recebimento em homologacao
+foi confirmado, mas a entrega de saida permanece pendente no ambiente real.
