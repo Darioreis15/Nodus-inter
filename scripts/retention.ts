@@ -1,18 +1,12 @@
-import { Prisma, PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { runRetention } from '../src/privacy/retention';
+
 const prisma = new PrismaClient();
 async function main() {
-  const days = Number(process.env.MESSAGE_RETENTION_DAYS);
-  const auditDays = Number(process.env.AUDIT_RETENTION_DAYS);
-  if (!Number.isInteger(days) || days < 1 || !Number.isInteger(auditDays) || auditDays < 1) throw new Error('Defina prazos de retencao aprovados, em dias.');
-  if (process.env.APPLY_RETENTION !== 'true') {
-    console.log('Dry-run:', await prisma.message.count({ where: { conversation: { contact: { legalHold: false } }, createdAt: { lt: new Date(Date.now() - days * 86400000) } } }), 'mensagens elegiveis. Para executar: APPLY_RETENTION=true.');
-    return;
+  const result = await runRetention(prisma, process.env);
+  console.log(JSON.stringify(result, null, 2));
+  if (result.mode === 'DRY_RUN') {
+    console.log('Simulacao: nenhum dado alterado. Revise todas as contagens e a preservacao legal antes de definir APPLY_RETENTION=true.');
   }
-  // Operador deve excluir do job bases sob retencao legal; ver SECURITY.md.
-  await prisma.message.deleteMany({ where: { conversation: { contact: { legalHold: false } }, createdAt: { lt: new Date(Date.now() - days * 86400000) } } });
-  await prisma.message.updateMany({ where: { conversation: { contact: { legalHold: false } } }, data: { raw: Prisma.DbNull } });
-  await prisma.rateBucket.deleteMany({ where: { expiresAt: { lt: new Date() } } });
-  await prisma.providerEvent.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - 90 * 86400000) } } });
-  await prisma.auditEvent.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - auditDays * 86400000) } } });
 }
-main().catch(() => { console.error('Falha na retencao.'); process.exitCode = 1; }).finally(() => prisma.$disconnect());
+main().catch(() => { console.error('Falha na retencao. Verifique os prazos e a conexao. Se estava em modo de aplicacao, operacoes anteriores podem ter sido concluidas.'); process.exitCode = 1; }).finally(() => prisma.$disconnect());
