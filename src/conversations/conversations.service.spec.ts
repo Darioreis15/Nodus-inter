@@ -11,6 +11,7 @@ describe('ConversationsService', () => {
 
   beforeEach(() => {
     prisma = {
+      tenant: { findUniqueOrThrow: jest.fn().mockResolvedValue({ status: "ACTIVE", workspaceSettings: {} }) },
       contact: { findUnique: jest.fn(), create: jest.fn() },
       conversation: {
         findFirst: jest.fn(),
@@ -61,6 +62,7 @@ describe('ConversationsService', () => {
     it('reaproveita conversa OPEN existente em vez de criar outra', async () => {
       contacts.findOrCreate.mockResolvedValue({ id: 'contact-1' });
       prisma.conversation.findFirst.mockResolvedValue({ id: 'conv-2', status: 'OPEN' });
+      prisma.conversation.update.mockResolvedValue({ id: 'conv-2', status: 'OPEN' });
 
       await service.recordInboundMessage(channel, '5531999999999', 'De novo', 'ext-2', {});
 
@@ -79,7 +81,7 @@ describe('ConversationsService', () => {
 
       expect(prisma.conversation.update).toHaveBeenCalledWith({
         where: { id: 'conv-3' },
-        data: { status: 'OPEN' },
+        data: { status: 'OPEN', updatedAt: expect.any(Date) },
       });
     });
   });

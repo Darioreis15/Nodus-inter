@@ -38,6 +38,12 @@ export class AsaasClient {
     return data as T;
   }
 
+  listCustomerPayments(customerId: string, offset: number) {
+    return this.request<{ data: Array<{ id: string; value: number; status: string; dueDate: string; paymentDate?: string; invoiceUrl?: string; description?: string }>; hasMore: boolean; totalCount: number }>(
+      `/payments?customer=${encodeURIComponent(customerId)}&limit=50&offset=${offset}`,
+    );
+  }
+
   cancelSubscription(id: string) {
     return this.request(`/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }

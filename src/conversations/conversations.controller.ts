@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { StartConversationDto, ContactNameDto, StageDto, TemplateMessageDto } from './dto/start-conversation.dto';
+import { Delete, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ConversationsService } from './conversations.service';
@@ -10,6 +11,27 @@ import { SendConversationMessageDto } from './dto/send-message.dto';
 @Controller('conversations')
 export class ConversationsController {
   constructor(private conversationsService: ConversationsService) {}
+
+  @Post()
+  start(@CurrentUser() user: AuthenticatedUser, @Body() dto: StartConversationDto) {
+    return this.conversationsService.start(user.tenantId, dto);
+  }
+  @Post(':id/template')
+  template(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: TemplateMessageDto) {
+    return this.conversationsService.sendTemplate(user.tenantId, id, dto);
+  }
+  @Patch(':id/contact')
+  rename(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ContactNameDto) {
+    return this.conversationsService.renameContact(user.tenantId, id, dto.name);
+  }
+  @Patch(':id/stage')
+  stage(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: StageDto) {
+    return this.conversationsService.setStage(user.tenantId, id, dto.stageId);
+  }
+  @Delete(':id')
+  remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.conversationsService.remove(user.tenantId, id, user.userId);
+  }
 
   @Get()
   list(
@@ -53,6 +75,6 @@ export class ConversationsController {
     @Param('id') id: string,
     @Body() dto: UpdateConversationStatusDto,
   ) {
-    return this.conversationsService.updateStatus(user.tenantId, id, dto.status);
+    return this.conversationsService.updateStatus(user.tenantId, id, dto.status, user.userId);
   }
 }

@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import { PasswordBytes } from '../../security/password';
 import { MaxLength, IsEmail, IsString, MinLength } from 'class-validator';
 
@@ -12,6 +13,7 @@ export class RegisterTenantDto {
   @MinLength(2)
   adminName: string;
 
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
   @IsEmail()
   adminEmail: string;
 

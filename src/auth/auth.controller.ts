@@ -1,3 +1,4 @@
+import { AllowSuspendedTenant } from '../common/decorators/allow-suspended-tenant.decorator';
 import { SetMetadata, Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterTenantDto } from './dto/register-tenant.dto';
@@ -22,6 +23,7 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @SetMetadata('allowPasswordChange', true)
+  @AllowSuspendedTenant()
   @Post('change-password')
   changePassword(@CurrentUser() user: AuthenticatedUser, @Body() dto: ChangePasswordDto) {
     return this.authService.changePassword(user, dto);
@@ -29,12 +31,14 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @SetMetadata('allowPasswordChange', true)
+  @AllowSuspendedTenant()
   @Post('logout-all')
   logoutAll(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.logoutAll(user);
   }
 
   @UseGuards(JwtAuthGuard)
+  @AllowSuspendedTenant()
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.me(user);

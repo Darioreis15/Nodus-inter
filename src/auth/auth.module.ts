@@ -1,3 +1,4 @@
+import { PasswordResetController } from './password-reset.controller';
 import { jwtSecret } from '../security/config';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
@@ -16,7 +17,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       }),
     }),
   ],
-  controllers: [AuthController, ProxyDiagnosticsController],
+  controllers: [PasswordResetController, AuthController, ProxyDiagnosticsController],
   providers: [AuthService, JwtStrategy],
   exports: [AuthService],
 })

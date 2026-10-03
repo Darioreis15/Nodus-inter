@@ -133,14 +133,21 @@ describe('AuthService', () => {
       );
     });
 
-    it('bloqueia login de tenant suspenso por inadimplencia', async () => {
+    it('normaliza o e-mail e permite admin suspenso obter token para o financeiro', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u', tenantId: 't', email: 'admin@example.com', passwordHash: await bcrypt.hash('valid-password', 10), role: 'ADMIN', tenant: { status: 'SUSPENDED' }, failedLoginCount: 0 });
+      const result = await service.login({ email: ' ADMIN@EXAMPLE.COM ', password: 'valid-password' });
+      expect(prisma.user.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { email: 'admin@example.com' } }));
+      expect(result.accessToken).toBe('signed.jwt.token');
+    });
+
+    it('bloqueia login do operador de tenant suspenso', async () => {
       const passwordHash = await bcrypt.hash('senha-correta', 10);
       prisma.user.findUnique.mockResolvedValue({
         id: 'user-1',
         tenantId: 'tenant-1',
         email: 'admin@demo.nodus.dev',
         passwordHash,
-        role: 'ADMIN',
+        role: 'AGENT',
         mustChangePassword: false,
         failedLoginCount: 0,
         tenant: { status: 'SUSPENDED' },

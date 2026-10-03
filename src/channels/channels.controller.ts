@@ -51,6 +51,19 @@ export class ChannelsController {
     return this.channelsService.updateAutoReply(user.tenantId, id, dto.enabled, dto.message);
   }
 
+  @Roles('ADMIN') @Post(':id/refresh')
+  refresh(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.channelsService.refresh(user.tenantId, id);
+  }
+  @Roles('ADMIN') @Post(':id/disconnect')
+  disconnect(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.channelsService.connectionAction(user.tenantId, id, 'disconnect');
+  }
+  @Roles('ADMIN') @Post(':id/restart')
+  restart(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.channelsService.connectionAction(user.tenantId, id, 'restart');
+  }
+
   @Roles('ADMIN')
   @Delete(':id')
   delete(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {

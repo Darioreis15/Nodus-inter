@@ -19,6 +19,19 @@ interface MetaConfig {
  */
 @Injectable()
 export class MetaConnector implements ChannelConnector {
+  async sendTemplate(channel: Channel, to: string, template: { name: string; language: string; parameters: string[] }): Promise<SendResult> {
+    const config = channel.config as unknown as MetaConfig;
+    const data = await metaRequest(`${encodeURIComponent(config.phoneNumberId)}/messages`,
+      unseal(config.accessToken, `meta:${config.phoneNumberId}`), {
+        messaging_product: 'whatsapp', to, type: 'template', template: {
+          name: template.name, language: { code: template.language },
+          ...(template.parameters.length ? { components: [{ type: 'body', parameters: template.parameters.map(text => ({ type: 'text', text })) }] } : {}),
+        },
+      });
+    if (typeof data?.messages?.[0]?.id !== 'string') throw new BadGatewayException('Meta nao retornou ID da mensagem.');
+    return { externalId: data.messages[0].id };
+  }
+
   async sendText(channel: Channel, message: OutboundTextMessage): Promise<SendResult> {
     const config = channel.config as unknown as MetaConfig;
 

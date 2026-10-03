@@ -1,3 +1,4 @@
+import { WorkspaceModule } from './workspace/workspace.controller';
 import { PrivacyModule } from './privacy/privacy.controller';
 import { Module } from '@nestjs/common';
 import { RateGuard, SecurityModule } from './security/rate.guard';
@@ -18,6 +19,7 @@ import { BillingModule } from './billing/billing.module';
 @Module({
   imports: [
     PrismaModule,
+    WorkspaceModule,
     PrivacyModule,
     SecurityModule,
     AuthModule,

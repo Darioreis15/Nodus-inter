@@ -1,5 +1,5 @@
-import { validateMetaToken } from './connectors/meta-api';
-import { seal } from '../security/secrets';
+import { validateMetaToken, metaRequest } from './connectors/meta-api';
+import { seal, unseal } from '../security/secrets';
 import { ForbiddenException, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ChannelRecord as Channel } from './channel.types';
 import * as crypto from 'crypto';
@@ -24,6 +24,9 @@ export class ChannelsService {
       name: c.name,
       type: c.type,
       status: c.status,
+      phoneNumber: (c.config as any)?.phoneNumber || null,
+      autoReplyEnabled: c.autoReplyEnabled,
+      autoReplyMessage: c.autoReplyMessage,
       createdAt: c.createdAt,
     }));
   }
@@ -130,18 +133,35 @@ export class ChannelsService {
     });
   }
 
+  async refresh(tenantId: string, channelId: string) {
+    const channel = await this.findOwnedChannel(tenantId, channelId);
+    const config = channel.config as Record<string, any>;
+    let result: { status: 'CONNECTED' | 'DISCONNECTED'; phoneNumber: string | null };
+    if (channel.type === 'QR_EVOLUTION') result = await this.evolutionConnector.connection(config.instanceName);
+    else {
+      const number = await metaRequest(`${encodeURIComponent(config.phoneNumberId)}?fields=id,display_phone_number`, unseal(config.accessToken, `meta:${config.phoneNumberId}`));
+      result = { status: 'CONNECTED', phoneNumber: typeof number.display_phone_number === 'string' ? number.display_phone_number : null };
+    }
+    await this.prisma.channel.update({ where: { id: channelId }, data: { status: result.status, config: { ...config, phoneNumber: result.phoneNumber } } });
+    return { id: channelId, ...result };
+  }
+
+  async connectionAction(tenantId: string, channelId: string, action: 'disconnect' | 'restart') {
+    const channel = await this.findOwnedChannel(tenantId, channelId);
+    if (channel.type !== 'QR_EVOLUTION') throw new BadRequestException('Esta operacao e exclusiva de conexoes QR Code. Gerencie a conexao oficial na Meta.');
+    const config = channel.config as { instanceName: string };
+    await this.evolutionConnector[action](config.instanceName);
+    await this.prisma.channel.update({ where: { id: channelId }, data: { status: action === 'disconnect' ? 'DISCONNECTED' : 'PENDING' } });
+    return { ok: true };
+  }
+
   async delete(tenantId: string, channelId: string) {
     const channel = await this.findOwnedChannel(tenantId, channelId);
 
+    if (await this.prisma.conversation.count({ where: { channelId, contact: { legalHold: true } } })) throw new ForbiddenException('Canal possui contatos sob preservacao legal.');
     if (channel.type === 'QR_EVOLUTION') {
       const config = channel.config as unknown as { instanceName: string };
-      // Best-effort: mesmo se a Evolution API estiver fora do ar ou a
-      // instancia ja nao existir mais la, o canal ainda tem que sumir daqui.
-      try {
-        await this.evolutionConnector.deleteInstance(config.instanceName);
-      } catch {
-        // segue o fluxo -- o importante e limpar o nosso lado
-      }
+      await this.evolutionConnector.deleteInstance(config.instanceName);
     }
 
     await this.prisma.channel.delete({ where: { id: channelId } });

@@ -21,10 +21,12 @@ export class UsersService {
       role: u.role,
       mustChangePassword: u.mustChangePassword,
       createdAt: u.createdAt,
+      availability: u.availability,
     }));
   }
 
   async createForTenant(tenantId: string, dto: CreateUserDto) {
+    dto.email = dto.email.trim().toLowerCase();
     const tenant = await this.prisma.tenant.findUniqueOrThrow({
       where: { id: tenantId },
       include: { plan: true, _count: { select: { users: true } } },
@@ -41,7 +43,7 @@ export class UsersService {
       throw new ConflictException('Ja existe uma conta com esse e-mail.');
     }
 
-    const temporaryPassword = crypto.randomBytes(18).toString('base64url');
+    const temporaryPassword = dto.temporaryPassword || crypto.randomBytes(18).toString('base64url');
     const passwordHash = await bcrypt.hash(temporaryPassword, 12);
 
     const user = await this.prisma.user.create({

@@ -30,6 +30,7 @@ export class AuthService {
   ) {}
 
   async registerTenant(dto: RegisterTenantDto) {
+    dto.adminEmail = dto.adminEmail.trim().toLowerCase();
     const existingUser = await this.prisma.user.findUnique({ where: { email: dto.adminEmail } });
     if (existingUser) {
       throw new ConflictException('Ja existe uma conta com esse e-mail.');
@@ -78,6 +79,7 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
+    dto.email = dto.email.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
       include: { tenant: { select: { status: true } } },
@@ -98,7 +100,7 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais invalidas.');
     }
 
-    if (user.tenant.status === 'SUSPENDED') {
+    if (user.tenant.status === 'SUSPENDED' && user.role !== 'ADMIN') {
       throw new ForbiddenException(
         'Sua empresa esta com o acesso suspenso por pendencia financeira. Regularize a assinatura para continuar.',
       );
@@ -155,6 +157,7 @@ export class AuthService {
         name: user.tenant.name,
         slug: user.tenant.slug,
         plan: user.tenant.plan.name,
+        status: user.tenant.status,
       },
     };
   }

@@ -12,6 +12,7 @@ describe('ChannelsService', () => {
   beforeEach(() => {
     jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ id: '1234567890' }) } as any);
     prisma = {
+      conversation: { count: jest.fn().mockResolvedValue(0) },
       tenant: { findUniqueOrThrow: jest.fn() },
       channel: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn() },
     };
@@ -111,7 +112,7 @@ describe('ChannelsService', () => {
       expect(prisma.channel.delete).toHaveBeenCalledWith({ where: { id: 'channel-1' } });
     });
 
-    it('nao falha se a Evolution API estiver fora do ar -- ainda assim apaga do banco', async () => {
+    it('preserva canal se a Evolution API nao confirmou a exclusao', async () => {
       prisma.channel.findFirst.mockResolvedValue({
         id: 'channel-1',
         tenantId: 'tenant-1',
@@ -121,8 +122,8 @@ describe('ChannelsService', () => {
       evolutionConnector.deleteInstance.mockRejectedValue(new Error('fora do ar'));
       prisma.channel.delete = jest.fn().mockResolvedValue({});
 
-      await expect(service.delete('tenant-1', 'channel-1')).resolves.toEqual({ deleted: true });
-      expect(prisma.channel.delete).toHaveBeenCalled();
+      await expect(service.delete('tenant-1', 'channel-1')).rejects.toThrow();
+      expect(prisma.channel.delete).not.toHaveBeenCalled();
     });
 
     it('canal oficial da Meta nao tenta chamar a Evolution API', async () => {
