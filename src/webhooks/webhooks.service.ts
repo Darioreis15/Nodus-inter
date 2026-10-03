@@ -49,6 +49,7 @@ export class WebhooksService {
         text,
         raw?.key?.id,
         payload,
+        raw?.key?.remoteJid?.endsWith('@g.us') ? undefined : raw?.pushName,
       );
       return { ok: true };
     }
@@ -87,6 +88,7 @@ export class WebhooksService {
             message.text?.body ?? '',
             message.id,
             message,
+            value?.contacts?.find((c: any) => c.wa_id === message.from)?.profile?.name,
           );
         }
 

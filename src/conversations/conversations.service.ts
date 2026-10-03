@@ -1,3 +1,5 @@
+import { defaults, withinHours, WorkspaceDto, AvailabilityDto } from '../workspace/workspace.dto';
+import { StartConversationDto, TemplateMessageDto } from './dto/start-conversation.dto';
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ContactsService } from './contacts.service';
@@ -45,7 +47,9 @@ export class ConversationsService {
     text: string,
     externalId: string | undefined,
     raw: unknown,
+    contactName?: string,
   ) {
+    contactName = typeof contactName === 'string' ? contactName.trim().slice(0, 120) : undefined;
     const saved = await this.prisma.$transaction(async tx => {
       // Serializa a recepcao por canal para deduplicar mensagens concorrentes.
       await tx.$queryRaw`SELECT id FROM channels WHERE id = ${channel.id} FOR UPDATE`;
@@ -55,20 +59,40 @@ export class ConversationsService {
       }
       const contact = await tx.contact.upsert({
         where: { tenantId_waId: { tenantId: channel.tenantId, waId: fromNumber } },
-        create: { tenantId: channel.tenantId, waId: fromNumber }, update: {},
+        create: { tenantId: channel.tenantId, waId: fromNumber, name: contactName?.slice(0, 120) || null }, update: {},
       });
+      if (!contact.name && contactName) await tx.contact.updateMany({ where: { id: contact.id, name: null }, data: { name: contactName } });
       let conversation = await tx.conversation.findFirst({
         where: { channelId: channel.id, contactId: contact.id, status: { in: ['OPEN', 'PENDING'] } },
         orderBy: { updatedAt: 'desc' },
       });
       const isNewConversation = !conversation;
       if (!conversation) conversation = await tx.conversation.create({ data: { channelId: channel.id, contactId: contact.id, status: 'OPEN' } });
-      else if (conversation.status === 'PENDING') conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { status: 'OPEN' } });
+      else conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { status: 'OPEN', updatedAt: new Date() } });
       const message = await tx.message.create({ data: {
         conversationId: conversation.id, direction: 'INBOUND', externalId,
         fromNumber, toNumber: channel.externalId ?? 'desconhecido', body: text, status: 'RECEIVED',
       } });
-      return { duplicate: false as const, conversation, contact, message, isNewConversation };
+      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: channel.tenantId } });
+      const settings = { ...defaults, ...tenant.workspaceSettings as object } as WorkspaceDto;
+      const open = withinHours(settings.businessHours, settings.timezone);
+      const stage = settings.stages.find(s => s.keyword.trim() && s.keyword.trim().toLowerCase() === text.trim().toLowerCase());
+      let reply: string | null = null;
+      if (!open) {
+        if (isNewConversation) reply = settings.awayMessage || null;
+      } else if (stage && conversation.funnelStage !== stage.id) {
+        let assignedUserId: string | null = null;
+        if (stage.userId) {
+          const operator = await tx.user.findFirst({ where: { id: stage.userId, tenantId: channel.tenantId } });
+          const availability = operator?.availability as unknown as AvailabilityDto;
+          if (operator && availability?.available !== false && withinHours(availability, settings.timezone)) assignedUserId = operator.id;
+        }
+        conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { funnelStage: stage.id, assignedUserId } });
+        reply = stage.message || null;
+      } else if (isNewConversation && channel.autoReplyEnabled) reply = channel.autoReplyMessage;
+      // Never respond automatically while billing is suspended.
+      if (tenant.status !== 'ACTIVE') reply = null;
+      return { duplicate: false as const, conversation, contact, message, isNewConversation, reply };
     });
     if (saved.duplicate) return saved.conversation;
     const { conversation, contact, message, isNewConversation } = saved;
@@ -85,8 +109,8 @@ export class ConversationsService {
       })
       .catch(() => {});
 
-    if (isNewConversation && channel.autoReplyEnabled && channel.autoReplyMessage) {
-      await this.sendAutoReply(channel, conversation.id, contact.waId, channel.autoReplyMessage);
+    if (saved.reply) {
+      await this.sendAutoReply(channel, conversation.id, contact.waId, saved.reply);
     }
 
     return conversation;
@@ -122,7 +146,7 @@ export class ConversationsService {
     const conversations = await this.prisma.conversation.findMany({
       where: {
         channel: { tenantId },
-        ...(filters.cursor ? { id: { gt: filters.cursor } } : {}),
+
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.assignedUserId ? { assignedUserId: filters.assignedUserId } : {}),
       },
@@ -131,7 +155,8 @@ export class ConversationsService {
         channel: { select: { id: true, name: true, type: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, direction: true, body: true, status: true, createdAt: true, fromNumber: true, toNumber: true } },
       },
-      orderBy: { id: 'asc' },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      ...(filters.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {}),
       take: 100,
     });
 
@@ -139,6 +164,9 @@ export class ConversationsService {
       id: c.id,
       status: c.status,
       assignedUserId: c.assignedUserId,
+      resolvedByName: c.resolvedByName,
+      resolvedAt: c.resolvedAt,
+      funnelStage: c.funnelStage,
       contact: { id: c.contact.id, waId: c.contact.waId, name: c.contact.name },
       channel: c.channel,
       lastMessage: c.messages[0] ?? null,
@@ -179,19 +207,80 @@ export class ConversationsService {
     return updated;
   }
 
-  async updateStatus(tenantId: string, conversationId: string, status: 'OPEN' | 'PENDING' | 'RESOLVED') {
+  async updateStatus(tenantId: string, conversationId: string, status: 'OPEN' | 'PENDING' | 'RESOLVED', actorId?: string) {
     await this.findOwnedConversation(tenantId, conversationId);
-    return this.prisma.conversation.update({ where: { id: conversationId }, data: { status } });
+    const actor = actorId ? await this.prisma.user.findFirst({ where: { id: actorId, tenantId } }) : null;
+    return this.prisma.$transaction(async tx => {
+      const updated = await tx.conversation.update({ where: { id: conversationId }, data: {
+        status, ...(status === 'RESOLVED' ? { resolvedById: actor?.id || null, resolvedByName: actor?.name || null, resolvedAt: new Date() } : {}),
+      } });
+      await tx.auditEvent.create({ data: { tenantId, actorId: actor?.id, action: `conversation.${status.toLowerCase()}:${conversationId}` } });
+      return updated;
+    });
   }
 
   async listMessages(tenantId: string, conversationId: string, cursor?: string) {
     await this.findOwnedConversation(tenantId, conversationId);
     return this.prisma.message.findMany({
-      where: { conversationId, ...(cursor ? { id: { gt: cursor } } : {}) },
-      orderBy: { id: 'asc' },
+      where: { conversationId },
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 100,
       select: { id: true, direction: true, body: true, status: true, createdAt: true, fromNumber: true, toNumber: true },
     });
+  }
+
+  async start(tenantId: string, dto: StartConversationDto) {
+    return this.prisma.$transaction(async tx => {
+      const channel = await tx.channel.findFirst({ where: { id: dto.channelId, tenantId } });
+      if (!channel) throw new NotFoundException('Canal nao encontrado.');
+      await tx.$queryRaw`SELECT id FROM channels WHERE id = ${channel.id} FOR UPDATE`;
+      const contact = await tx.contact.upsert({ where: { tenantId_waId: { tenantId, waId: dto.phone } },
+        create: { tenantId, waId: dto.phone, name: dto.name || null }, update: {} });
+      const existing = await tx.conversation.findFirst({ where: { channelId: channel.id, contactId: contact.id, status: { in: ['OPEN', 'PENDING'] } } });
+      return existing || tx.conversation.create({ data: { channelId: channel.id, contactId: contact.id } });
+    });
+  }
+
+  async renameContact(tenantId: string, id: string, name: string) {
+    const conversation = await this.findOwnedConversation(tenantId, id);
+    await this.prisma.contact.update({ where: { id: conversation.contactId }, data: { name: name.trim() } });
+    return { updated: true };
+  }
+
+  async setStage(tenantId: string, id: string, stageId: string) {
+    await this.findOwnedConversation(tenantId, id);
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const settings = { ...defaults, ...tenant.workspaceSettings as object } as WorkspaceDto;
+    if (!settings.stages.some(s => s.id === stageId)) throw new NotFoundException('Etapa nao encontrada.');
+    // Moving manually never sends messages without an explicit send action.
+    return this.prisma.conversation.update({ where: { id }, data: { funnelStage: stageId } });
+  }
+
+  async remove(tenantId: string, id: string, actorId: string) {
+    return this.prisma.$transaction(async tx => {
+      const conversation = await tx.conversation.findFirst({ where: { id, channel: { tenantId } }, include: { channel: true, contact: true } });
+      if (!conversation) throw new NotFoundException('Conversa nao encontrada.');
+      if (conversation.channel.type !== 'QR_EVOLUTION') throw new ForbiddenException('Exclusao disponivel apenas para canais QR Code.');
+      if (conversation.contact.legalHold) throw new ForbiddenException('Contato sob preservacao legal.');
+      await tx.conversation.delete({ where: { id } });
+      await tx.auditEvent.create({ data: { tenantId, actorId, action: 'conversation.deleted' } });
+      return { deleted: true, scope: 'local_conversation_and_messages' };
+    });
+  }
+
+  async sendTemplate(tenantId: string, conversationId: string, dto: TemplateMessageDto) {
+    const conversation = await this.prisma.conversation.findFirst({ where: { id: conversationId, channel: { tenantId } }, include: { channel: true, contact: true } });
+    if (!conversation) throw new NotFoundException('Conversa nao encontrada.');
+    if (conversation.channel.type !== 'OFFICIAL_META') throw new ForbiddenException('Templates sao exclusivos da Meta.');
+    const result = await this.metaConnector.sendTemplate(conversation.channel, conversation.contact.waId, dto);
+    const message = await this.prisma.message.create({ data: {
+      conversationId, direction: 'OUTBOUND', externalId: result.externalId,
+      fromNumber: conversation.channel.externalId || '', toNumber: conversation.contact.waId,
+      body: `[Template: ${dto.name} (${dto.language})]${dto.parameters.length ? ' ' + dto.parameters.join(' | ') : ''}`, status: 'SENT',
+    } });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { status: 'PENDING' } });
+    return message;
   }
 
   async sendMessage(tenantId: string, conversationId: string, text: string) {
@@ -201,6 +290,11 @@ export class ConversationsService {
     });
     if (!conversation) {
       throw new NotFoundException('Conversa nao encontrada.');
+    }
+
+    if (conversation.channel.type === 'OFFICIAL_META') {
+      const recent = await this.prisma.message.findFirst({ where: { conversationId, direction: 'INBOUND', createdAt: { gt: new Date(Date.now() - 24 * 3600000) } } });
+      if (!recent) throw new ForbiddenException('Fora da janela de atendimento da Meta. Envie um template aprovado ou aguarde uma mensagem do cliente.');
     }
 
     const connector = this.connectorFor(conversation.channel.type as 'QR_EVOLUTION' | 'OFFICIAL_META');

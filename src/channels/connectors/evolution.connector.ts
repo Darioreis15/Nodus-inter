@@ -87,6 +87,36 @@ export class EvolutionConnector implements ChannelConnector {
     }
   }
 
+  private async instanceRequest(path: string, method = 'GET') {
+    const response = await fetch(`${this.baseUrl}/instance/${path}`, {
+      method, signal: AbortSignal.timeout(10000), redirect: 'error',
+      headers: { apikey: this.globalApiKey },
+    });
+    if (!response.ok) throw new BadGatewayException(`Evolution recusou a operacao: HTTP ${response.status}`);
+    return response.json().catch(() => ({}));
+  }
+
+  async connection(instanceName: string) {
+    const name = encodeURIComponent(instanceName);
+    const data = await this.instanceRequest(`fetchInstances?instanceName=${name}`);
+    const entries = Array.isArray(data) ? data : [];
+    const entry = entries.find((e: any) => (e.name || e.instance?.instanceName || e.instance?.name) === instanceName);
+    if (!entry) return { status: 'DISCONNECTED' as const, phoneNumber: null };
+    const instance = entry.instance || entry;
+    const state = instance.connectionStatus || instance.status || instance.state;
+    const jid = instance.ownerJid || instance.owner || '';
+    return { status: state === 'open' ? 'CONNECTED' as const : 'DISCONNECTED' as const,
+      phoneNumber: typeof jid === 'string' ? jid.split('@')[0].split(':')[0] || null : null };
+  }
+
+  async disconnect(instanceName: string) {
+    await this.instanceRequest(`logout/${encodeURIComponent(instanceName)}`, 'DELETE');
+  }
+
+  async restart(instanceName: string) {
+    await this.instanceRequest(`restart/${encodeURIComponent(instanceName)}`, 'POST');
+  }
+
   async sendText(channel: Channel, message: OutboundTextMessage): Promise<SendResult> {
     const config = channel.config as unknown as EvolutionConfig;
     const response = await fetch(`${this.baseUrl}/message/sendText/${config.instanceName}`, {

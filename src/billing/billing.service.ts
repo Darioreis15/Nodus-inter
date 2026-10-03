@@ -68,6 +68,16 @@ export class BillingService {
     };
   }
 
+  async payments(tenantId: string, offset: number) {
+    const subscription = await this.prisma.subscription.findUnique({ where: { tenantId } });
+    if (!subscription) return { data: [], hasMore: false, totalCount: 0 };
+    const result = await this.asaas.listCustomerPayments(subscription.asaasCustomerId, offset);
+    return { hasMore: result.hasMore, totalCount: result.totalCount, data: result.data.map(p => ({
+      id: p.id, value: p.value, status: p.status, dueDate: p.dueDate,
+      paymentDate: p.paymentDate || null, invoiceUrl: p.invoiceUrl || null, description: p.description || null,
+    })) };
+  }
+
   async getStatus(tenantId: string) {
     const subscription = await this.prisma.subscription.findUnique({ where: { tenantId } });
     const tenant = await this.prisma.tenant.findUniqueOrThrow({

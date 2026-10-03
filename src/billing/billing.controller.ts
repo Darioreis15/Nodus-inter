@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Query, Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -16,6 +16,13 @@ export class BillingController {
   @Get('status')
   status(@CurrentUser() user: AuthenticatedUser) {
     return this.billingService.getStatus(user.tenantId);
+  }
+
+  @UseGuards(RolesGuard) @Roles('ADMIN') @AllowSuspendedTenant() @Get('payments')
+  payments(@CurrentUser() user: AuthenticatedUser, @Query('offset') raw = '0') {
+    const offset = Number(raw);
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100000) throw new BadRequestException('Paginacao invalida.');
+    return this.billingService.payments(user.tenantId, offset);
   }
 
   @UseGuards(RolesGuard)

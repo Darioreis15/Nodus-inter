@@ -10,7 +10,7 @@ export class RateGuard implements CanActivate {
     const req = context.switchToHttp().getRequest();
     const res = context.switchToHttp().getResponse();
     const path = (req.path as string).toLowerCase().replace(/\/+$/, '');
-    const login = path === '/auth/login';
+    const login = ['/auth/login', '/auth/forgot-password', '/auth/reset-password'].includes(path);
     const registration = path === '/auth/register';
     const webhook = path.startsWith('/webhooks/');
     const scope = login ? 'login' : registration ? 'register' : webhook ? 'webhooks' : 'api';

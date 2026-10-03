@@ -67,6 +67,7 @@ describe('WebhooksService', () => {
         'Oi, preciso de ajuda',
         'evo-1',
         expect.anything(),
+        undefined,
       );
     });
   });
@@ -100,6 +101,7 @@ describe('WebhooksService', () => {
         'Oi',
         'wamid.1',
         expect.anything(),
+        undefined,
       );
     });
 

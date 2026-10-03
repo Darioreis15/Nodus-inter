@@ -78,6 +78,7 @@ model Tenant {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
+  workspaceSettings    Json @default("{}") @map("workspace_settings")
   plan                 Plan                  @relation(fields: [planId], references: [id])
   users                User[]
   channels             Channel[]
@@ -105,6 +106,8 @@ model User {
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
+  availability Json @default("{}")
+  passwordResets PasswordReset[]
   assignedConversations Conversation[]
 
   @@index([tenantId])
@@ -159,6 +162,10 @@ model Conversation {
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
+  resolvedByName String? @map("resolved_by_name")
+  resolvedById String? @map("resolved_by_id")
+  resolvedAt DateTime? @map("resolved_at")
+  funnelStage String? @map("funnel_stage")
   channel      Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
   contact      Contact   @relation(fields: [contactId], references: [id])
   assignedUser User?     @relation(fields: [assignedUserId], references: [id])
@@ -255,4 +262,14 @@ model ProviderEvent {
   createdAt DateTime @default(now())
   @@index([createdAt])
   @@map("provider_events")
+}
+
+model PasswordReset {
+  tokenHash String @id @map("token_hash")
+  userId String @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([expiresAt])
+  @@map("password_resets")
 }
