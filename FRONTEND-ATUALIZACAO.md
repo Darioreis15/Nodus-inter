@@ -94,3 +94,7 @@ Publique o backend e substitua frontend/app.js e frontend/index.html na hospedag
 ADMIN pode excluir AGENT da própria empresa em DELETE /users/:id, com confirmação no painel. Não permite excluir administradores nem o próprio acesso. A exclusão libera uma vaga; o limite maxUsers conta administradores e operadores. GET /users/limits (ADMIN) retorna uso, limite e vagas disponíveis. Cadastro/exclusão usam transação com trava na empresa para serializar mudanças de vagas e impedir cadastros concorrentes acima do limite.
 
 Conversas, mensagens, nomes de finalizadores e auditoria são preservados. Atribuições são removidas e etapas de funil deixam de apontar para o operador excluído. Tokens de recuperação são apagados por cascade; JWTs antigos são recusados na próxima requisição porque o usuário não existe mais. Sem migração. Atualizar frontend/app.js e frontend/index.html após deploy.
+
+## Relatório por usuário
+
+GET /reports/summary inclui resolvedByUser: userId, name, count. A seção conta cada conversa atualmente RESOLVED uma vez, pelo resolvedById (último finalizador), em todo o histórico disponível. Não conta eventos repetidos de fechamento; reabertas saem da contagem até nova finalização. O gráfico de mensagens continua nos últimos 7 dias. Nomes históricos são preservados após exclusão do operador; registros sem autor aparecem como Usuário não identificado. Os dados são limitados aos canais da empresa autenticada. Backend precisa deste deploy; sem migração.
