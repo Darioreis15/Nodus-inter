@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { defaults, withinHours, WorkspaceDto, AvailabilityDto } from '../workspace/workspace.dto';
 import { StartConversationDto, TemplateMessageDto } from './dto/start-conversation.dto';
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
@@ -13,6 +14,7 @@ interface ListFilters {
   cursor?: string;
   status?: 'OPEN' | 'PENDING' | 'RESOLVED';
   assignedUserId?: string;
+  departmentId?: string;
 }
 
 @Injectable()
@@ -42,6 +44,7 @@ export class ConversationsService {
       type: 'QR_EVOLUTION' | 'OFFICIAL_META';
       autoReplyEnabled: boolean;
       autoReplyMessage: string | null;
+      autoReplyDepartmentId?: string | null;
     },
     fromNumber: string,
     text: string,
@@ -51,6 +54,7 @@ export class ConversationsService {
   ) {
     contactName = typeof contactName === 'string' ? contactName.trim().slice(0, 120) : undefined;
     const saved = await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${channel.tenantId} FOR UPDATE`;
       // Serializa a recepcao por canal para deduplicar mensagens concorrentes.
       await tx.$queryRaw`SELECT id FROM channels WHERE id = ${channel.id} FOR UPDATE`;
       if (externalId) {
@@ -74,12 +78,20 @@ export class ConversationsService {
         fromNumber, toNumber: channel.externalId ?? 'desconhecido', body: text, status: 'RECEIVED',
       } });
       const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: channel.tenantId } });
+      const optOut = ['sair','parar','stop','cancelar'].includes(text.trim().toLowerCase());
+      if (optOut) {
+        const phoneHash = createHash('sha256').update(`${channel.tenantId}:${fromNumber}`).digest('hex');
+        await tx.campaignSuppression.upsert({where:{tenantId_phoneHash:{tenantId:channel.tenantId,phoneHash}},create:{tenantId:channel.tenantId,phoneHash},update:{}});
+      }
+      await tx.campaignDelivery.updateMany({where:{contactId:contact.id,status:'QUEUED',campaign:{tenantId:channel.tenantId,...(optOut ? {} : {channelId:channel.id,stopOnReply:true})}},data:{status:'SKIPPED',payload:{},error:optOut ? 'Destinatario optou por sair.' : 'Cliente respondeu.',finishedAt:new Date()}});
       const settings = { ...defaults, ...tenant.workspaceSettings as object } as WorkspaceDto;
       const open = withinHours(settings.businessHours, settings.timezone);
-      const stage = settings.stages.find(s => s.keyword.trim() && s.keyword.trim().toLowerCase() === text.trim().toLowerCase());
+      const candidates = settings.stages.filter(s => s.keyword.trim() && s.keyword.trim().toLowerCase() === text.trim().toLowerCase());
+      const stage = candidates.find(s => s.fromStageId && s.fromStageId === conversation!.funnelStage) || candidates.find(s => !s.fromStageId);
       let reply: string | null = null;
+      let departmentId: string | null | undefined;
       if (!open) {
-        if (isNewConversation) reply = settings.awayMessage || null;
+        if (isNewConversation) { reply = settings.awayMessage || null; if (reply) departmentId = settings.awayDepartmentId; }
       } else if (stage && conversation.funnelStage !== stage.id) {
         let assignedUserId: string | null = null;
         if (stage.userId) {
@@ -89,9 +101,17 @@ export class ConversationsService {
         }
         conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { funnelStage: stage.id, assignedUserId } });
         reply = stage.message || null;
-      } else if (isNewConversation && channel.autoReplyEnabled) reply = channel.autoReplyMessage;
+        departmentId = stage.departmentId ?? null;
+      } else if (isNewConversation && channel.autoReplyEnabled) {
+        reply = channel.autoReplyMessage;
+        if (reply) departmentId = channel.autoReplyDepartmentId;
+      }
+      if (departmentId !== undefined) {
+        const validDepartment = settings.departments?.some((d: { id: string }) => d.id === departmentId) ? departmentId : null;
+        conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { departmentId: validDepartment } });
+      }
       // Never respond automatically while billing is suspended.
-      if (tenant.status !== 'ACTIVE') reply = null;
+      if (tenant.status !== 'ACTIVE' || optOut) reply = null;
       return { duplicate: false as const, conversation, contact, message, isNewConversation, reply };
     });
     if (saved.duplicate) return saved.conversation;
@@ -147,6 +167,7 @@ export class ConversationsService {
       where: {
         channel: { tenantId },
 
+        ...(filters.departmentId ? { departmentId: filters.departmentId } : {}),
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.assignedUserId ? { assignedUserId: filters.assignedUserId } : {}),
       },
@@ -167,6 +188,7 @@ export class ConversationsService {
       resolvedByName: c.resolvedByName,
       resolvedAt: c.resolvedAt,
       funnelStage: c.funnelStage,
+      departmentId: c.departmentId,
       contact: { id: c.contact.id, waId: c.contact.waId, name: c.contact.name },
       channel: c.channel,
       lastMessage: c.messages[0] ?? null,
@@ -182,6 +204,17 @@ export class ConversationsService {
       throw new NotFoundException('Conversa nao encontrada.');
     }
     return conversation;
+  }
+
+  async setDepartment(tenantId: string, id: string, departmentId: string | null) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
+      const conversation = await tx.conversation.findFirst({ where: { id, channel: { tenantId } } });
+      if (!conversation) throw new NotFoundException('Conversa nao encontrada.');
+      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+      if (departmentId && !(tenant.workspaceSettings as any)?.departments?.some((d: { id: string }) => d.id === departmentId)) throw new NotFoundException('Setor nao encontrado.');
+      return tx.conversation.update({ where: { id }, data: { departmentId, assignedUserId: null } });
+    });
   }
 
   async assign(tenantId: string, conversationId: string, userId: string) {
