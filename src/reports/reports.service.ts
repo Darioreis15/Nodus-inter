@@ -18,10 +18,11 @@ export class ReportsService {
         messages: { inbound: 0, outbound: 0 },
         averageFirstResponseMinutes: null,
         messagesLast7Days: [],
+        resolvedByUser: [],
       };
     }
 
-    const [statusGroups, conversations] = await Promise.all([
+    const [statusGroups, conversations, resolvedGroups] = await Promise.all([
       this.prisma.conversation.groupBy({
         by: ['status'],
         where: { channelId: { in: channelIds } },
@@ -34,7 +35,30 @@ export class ReportsService {
           messages: { orderBy: { createdAt: 'asc' }, select: { direction: true, createdAt: true } },
         },
       }),
+      this.prisma.conversation.groupBy({
+        by: ['resolvedById', 'resolvedByName'],
+        where: { channelId: { in: channelIds }, status: 'RESOLVED' },
+        _count: { _all: true },
+        _max: { resolvedAt: true },
+      }),
     ]);
+
+    // Count each currently resolved conversation once, by actual resolver rather than assignee.
+    // Keep snapshots for deleted users and combine name changes under the same user ID.
+    const resolvers = new Map<string | null, { userId: string | null; name: string; count: number; latest: number }>();
+    for (const group of resolvedGroups) {
+      const key = group.resolvedById;
+      const latest = group._max.resolvedAt?.getTime() ?? 0;
+      const name = group.resolvedByName || 'Usuário não identificado';
+      const row = resolvers.get(key);
+      if (row) {
+        row.count += group._count._all;
+        if (latest > row.latest) { row.name = name; row.latest = latest; }
+      } else resolvers.set(key, { userId: key, name, count: group._count._all, latest });
+    }
+    const resolvedByUser = [...resolvers.values()]
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      .map(({ latest, ...row }) => row);
 
     const conversationsByStatus = { OPEN: 0, PENDING: 0, RESOLVED: 0 } as Record<string, number>;
     for (const group of statusGroups as Array<{ status: string; _count: { _all: number } }>) {
@@ -89,6 +113,7 @@ export class ReportsService {
       messages: { inbound, outbound },
       averageFirstResponseMinutes,
       messagesLast7Days: last7Days,
+      resolvedByUser,
     };
   }
 }
