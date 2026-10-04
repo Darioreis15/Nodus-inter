@@ -24,6 +24,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     ) === true;
     await assertTenantAccess(this.prisma, request.user?.tenantId, allowSuspended);
     if (request.method === 'DELETE' && request.path.toLowerCase().startsWith('/privacy/')) await this.rate.consume(`privacy-erase:${request.user.userId}`, 5, 3600000);
+    if (['/auth/change-email','/auth/change-password'].includes(request.path.toLowerCase().replace(/\/+$/, ''))) await this.rate.consume(`account-change:${request.user.userId}`, 5, 900000);
     await this.rate.consume(`tenant:${request.user.tenantId}`, 600, 60000);
     await this.rate.consume(`user:${request.user.userId}`, 120, 60000);
     return true;
