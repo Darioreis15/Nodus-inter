@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, ForbiddenException } from '@nestjs/common';
+import { ConflictException, Injectable, ForbiddenException, Logger } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -6,6 +6,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
   constructor(private prisma: PrismaService) {}
 
   async listForTenant(tenantId: string) {
@@ -57,7 +58,10 @@ export class UsersService {
       },
     });
 
+    const invitationEmailStatus = await this.sendInvitation(user, temporaryPassword);
+
     return {
+      invitationEmailStatus,
       id: user.id,
       name: user.name,
       email: user.email,
@@ -65,4 +69,26 @@ export class UsersService {
       temporaryPassword, // exibir uma unica vez para o admin repassar ao novo agente
     };
   }
+
+  private async sendInvitation(user: { name: string; email: string }, password: string): Promise<'accepted' | 'failed' | 'not_configured'> {
+    const apiKey = process.env.RESEND_API_KEY;
+    const from = process.env.MAIL_FROM;
+    const origin = process.env.FRONTEND_URL;
+    if (!apiKey || !from || !origin || !/^https:\/\/[^/?#]+\/?$/.test(origin)) return 'not_configured';
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST', signal: AbortSignal.timeout(10000),
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from, to: [user.email], subject: 'Seu acesso ao Nodus',
+          text: `Olá, ${user.name}!\n\nSeu acesso ao Nodus foi criado.\nAcesse: ${origin.replace(/\/$/, '')}\nE-mail: ${user.email}\nSenha temporária: ${password}\n\nVocê deverá trocar essa senha no primeiro acesso. Não compartilhe sua senha.\nSe precisar, use Esqueci minha senha na tela de login.` }),
+      });
+      if (!response.ok) throw new Error('Invitation rejected');
+      return 'accepted';
+    } catch {
+      // Never log credentials, recipient, request body or provider response.
+      this.logger.warn('Falha ao enviar convite de acesso. Usuario criado; repasse a senha temporaria por canal privado.');
+      return 'failed';
+    }
+  }
+
 }
