@@ -98,3 +98,7 @@ Conversas, mensagens, nomes de finalizadores e auditoria são preservados. Atrib
 ## Relatório por usuário
 
 GET /reports/summary inclui resolvedByUser: userId, name, count. A seção conta cada conversa atualmente RESOLVED uma vez, pelo resolvedById (último finalizador), em todo o histórico disponível. Não conta eventos repetidos de fechamento; reabertas saem da contagem até nova finalização. O gráfico de mensagens continua nos últimos 7 dias. Nomes históricos são preservados após exclusão do operador; registros sem autor aparecem como Usuário não identificado. Os dados são limitados aos canais da empresa autenticada. Backend precisa deste deploy; sem migração.
+
+## Abas separadas: Configurações e Automações
+
+Configurações contém expediente/fuso e integração por API. Automações (ADMIN) contém boas-vindas por canal, resposta fora de horário e etapas/palavras-chave/encaminhamentos. Conexões passa a tratar apenas os canais. O funil visual continua na aba Funil. As mesmas rotas e dados são reutilizados; salvar uma seção consulta os campos atuais da outra antes de enviar o workspace completo. Não há migração nem nova variável. Publicar frontend/app.js e frontend/index.html na Hostinger; o backend existente é compatível.
