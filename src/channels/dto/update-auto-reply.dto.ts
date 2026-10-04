@@ -1,6 +1,7 @@
-import { MaxLength, IsBoolean, IsOptional, IsString } from 'class-validator';
+import { MaxLength, IsBoolean, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class UpdateAutoReplyDto {
+  @IsOptional() @IsUUID() departmentId?: string | null;
   @IsBoolean()
   enabled: boolean;
 
