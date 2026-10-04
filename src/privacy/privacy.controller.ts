@@ -32,7 +32,8 @@ export class PrivacyController {
       select: { id: true, body: true, createdAt: true, direction: true, status: true },
     });
     await this.prisma.auditEvent.create({ data: { tenantId: user.tenantId, actorId: user.userId, action: 'privacy.contact.export' } });
-    return { contact: { id: contact.id, name: contact.name, waId: contact.waId }, messages, nextCursor: messages.length === 100 ? messages[99].id : null };
+    const scheduledMessages = await this.prisma.campaignDelivery.findMany({where:{contactId:id,campaign:{tenantId:user.tenantId},status:{in:['QUEUED','SENDING']},...(cursor ? {id:{gt:cursor}} : {})},orderBy:{id:'asc'},take:100,select:{id:true,dueAt:true,status:true,payload:true}});
+    return { scheduledMessages, scheduledNextCursor:scheduledMessages.length === 100 ? scheduledMessages[99].id : null, contact: { id: contact.id, name: contact.name, waId: contact.waId }, messages, nextCursor: messages.length === 100 ? messages[99].id : null };
   }
   @AllowSuspendedTenant()
   @Delete('contacts/:id')
@@ -56,6 +57,7 @@ export class PrivacyController {
     await this.prisma.$transaction(async tx => {
       const target = await tx.user.findFirst({ where: { id, tenantId: user.tenantId } });
       if (!target) throw new NotFoundException();
+      if (target.isOwner) throw new ForbiddenException("O administrador principal nao pode ser excluido individualmente.");
       await tx.conversation.updateMany({ where: { assignedUserId: id, channel: { tenantId: user.tenantId } }, data: { assignedUserId: null } });
       await tx.user.delete({ where: { id } });
       await tx.auditEvent.updateMany({ where: { actorId: id }, data: { actorId: null } });
