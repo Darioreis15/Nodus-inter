@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Delete, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -21,4 +21,16 @@ export class UsersController {
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateUserDto) {
     return this.usersService.createForTenant(user.tenantId, dto);
   }
+  @Roles('ADMIN')
+  @Get('limits')
+  limits(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.limitsForTenant(user.tenantId);
+  }
+
+  @Roles('ADMIN')
+  @Delete(':id')
+  remove(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.usersService.deleteOperator(user.tenantId, user.userId, id);
+  }
+
 }

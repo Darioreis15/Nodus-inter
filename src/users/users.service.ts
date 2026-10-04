@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, ForbiddenException, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -28,34 +28,37 @@ export class UsersService {
 
   async createForTenant(tenantId: string, dto: CreateUserDto) {
     dto.email = dto.email.trim().toLowerCase();
-    const tenant = await this.prisma.tenant.findUniqueOrThrow({
-      where: { id: tenantId },
-      include: { plan: true, _count: { select: { users: true } } },
-    });
-
-    if (tenant._count.users >= tenant.plan.maxUsers) {
-      throw new ForbiddenException(
-        `Limite de usuarios do plano ${tenant.plan.name} atingido (${tenant.plan.maxUsers}).`,
-      );
-    }
-
-    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (existing) {
-      throw new ConflictException('Ja existe uma conta com esse e-mail.');
-    }
-
     const temporaryPassword = dto.temporaryPassword || crypto.randomBytes(18).toString('base64url');
     const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+    const user = await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
+      const tenant = await tx.tenant.findUniqueOrThrow({
+        where: { id: tenantId },
+        include: { plan: true, _count: { select: { users: true } } },
+      });
 
-    const user = await this.prisma.user.create({
-      data: {
-        tenantId,
-        name: dto.name,
-        email: dto.email,
-        role: dto.role,
-        passwordHash,
-        mustChangePassword: true,
-      },
+      if (tenant._count.users >= tenant.plan.maxUsers) {
+        throw new ForbiddenException(
+          `Limite de usuarios do plano ${tenant.plan.name} atingido (${tenant.plan.maxUsers}).`,
+        );
+      }
+
+      const existing = await tx.user.findUnique({ where: { email: dto.email } });
+      if (existing) {
+        throw new ConflictException('Ja existe uma conta com esse e-mail.');
+      }
+
+      return tx.user.create({
+        data: {
+          tenantId,
+          name: dto.name,
+          email: dto.email,
+          role: dto.role,
+          passwordHash,
+          mustChangePassword: true,
+        },
+      });
+
     });
 
     const invitationEmailStatus = await this.sendInvitation(user, temporaryPassword);
@@ -68,6 +71,37 @@ export class UsersService {
       role: user.role,
       temporaryPassword, // exibir uma unica vez para o admin repassar ao novo agente
     };
+  }
+
+  async limitsForTenant(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({
+      where: { id: tenantId }, include: { plan: true, _count: { select: { users: true } } },
+    });
+    return { planName: tenant.plan.name, used: tenant._count.users, maxUsers: tenant.plan.maxUsers,
+      available: Math.max(0, tenant.plan.maxUsers - tenant._count.users) };
+  }
+
+  async deleteOperator(tenantId: string, actorId: string, id: string) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
+      const target = await tx.user.findFirst({ where: { id, tenantId } });
+      if (!target) throw new NotFoundException('Operador nao encontrado.');
+      if (id === actorId || target.role !== 'AGENT') throw new ForbiddenException('Somente operadores podem ser excluidos. Administradores e seu proprio acesso sao preservados.');
+      await tx.conversation.updateMany({ where: { assignedUserId: id, channel: { tenantId } }, data: { assignedUserId: null } });
+      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+      const settings = JSON.parse(JSON.stringify(tenant.workspaceSettings || {}));
+      if (Array.isArray(settings.stages)) {
+        settings.stages = settings.stages.map((stage: any) => {
+          if (stage.userId === id) { const { userId, ...rest } = stage; return rest; }
+          return stage;
+        });
+        await tx.tenant.update({ where: { id: tenantId }, data: { workspaceSettings: settings } });
+      }
+      // Password reset records cascade; resolver snapshots and audit history remain intact.
+      await tx.user.delete({ where: { id } });
+      await tx.auditEvent.create({ data: { tenantId, actorId, action: `user.deleted:${id}` } });
+      return { deleted: true };
+    });
   }
 
   private async sendInvitation(user: { name: string; email: string }, password: string): Promise<'accepted' | 'failed' | 'not_configured'> {
