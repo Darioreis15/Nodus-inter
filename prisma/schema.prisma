@@ -70,6 +70,9 @@ model Plan {
 }
 
 model Tenant {
+  campaigns Campaign[]
+  suppressions CampaignSuppression[]
+  dispatchClock DateTime? @map("dispatch_clock")
   id        String       @id @default(uuid())
   name      String
   slug      String       @unique
@@ -91,6 +94,7 @@ model Tenant {
 }
 
 model User {
+  isOwner Boolean @default(false) @map("is_owner")
   id                 String   @id @default(uuid())
   tenantId           String   @map("tenant_id")
   name               String
@@ -115,6 +119,7 @@ model User {
 }
 
 model Channel {
+  campaigns Campaign[]
   id         String        @id @default(uuid())
   tenantId   String        @map("tenant_id")
   type       ChannelType
@@ -125,6 +130,7 @@ model Channel {
   // OFFICIAL_META: { phoneNumberId, wabaId, accessToken }
   config     Json          @default("{}")
   autoReplyEnabled Boolean @default(false) @map("auto_reply_enabled")
+  autoReplyDepartmentId String? @map("auto_reply_department_id")
   autoReplyMessage String? @map("auto_reply_message")
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
@@ -138,6 +144,7 @@ model Channel {
 }
 
 model Contact {
+  deliveries CampaignDelivery[]
   id        String   @id @default(uuid())
   tenantId  String   @map("tenant_id")
   legalHold Boolean @default(false) @map("legal_hold")
@@ -165,6 +172,7 @@ model Conversation {
   resolvedByName String? @map("resolved_by_name")
   resolvedById String? @map("resolved_by_id")
   resolvedAt DateTime? @map("resolved_at")
+  departmentId String? @map("department_id")
   funnelStage String? @map("funnel_stage")
   channel      Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
   contact      Contact   @relation(fields: [contactId], references: [id])
@@ -272,4 +280,49 @@ model PasswordReset {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([expiresAt])
   @@map("password_resets")
+}
+
+model Campaign {
+  id String @id @default(uuid())
+  tenantId String @map("tenant_id")
+  channelId String @map("channel_id")
+  name String
+  state String @default("ACTIVE")
+  requestKey String @map("request_key")
+  requestHash String @map("request_hash")
+  createdAt DateTime @default(now()) @map("created_at")
+  stopOnReply Boolean @default(true) @map("stop_on_reply")
+  sourceKeyHash String? @map("source_key_hash")
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  deliveries CampaignDelivery[]
+  @@unique([tenantId, requestKey])
+  @@index([tenantId, createdAt])
+  @@map("campaigns")
+}
+model CampaignDelivery {
+  id String @id @default(uuid())
+  campaignId String @map("campaign_id")
+  contactId String @map("contact_id")
+  step Int
+  dueAt DateTime @map("due_at")
+  status String @default("QUEUED")
+  payload Json
+  messageId String? @map("message_id")
+  error String?
+  startedAt DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  @@unique([campaignId, contactId, step])
+  @@index([status, dueAt])
+  @@map("campaign_deliveries")
+}
+model CampaignSuppression {
+  tenantId String @map("tenant_id")
+  phoneHash String @map("phone_hash")
+  createdAt DateTime @default(now()) @map("created_at")
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  @@id([tenantId, phoneHash])
+  @@map("campaign_suppressions")
 }
