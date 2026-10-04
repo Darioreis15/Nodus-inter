@@ -49,6 +49,7 @@ async function main() {
         email: 'admin@demo.nodus.dev',
         passwordHash,
         role: 'ADMIN',
+        isOwner: true,
         mustChangePassword: true,
       },
     });
