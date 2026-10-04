@@ -27,6 +27,7 @@ export class ChannelsService {
       phoneNumber: (c.config as any)?.phoneNumber || null,
       autoReplyEnabled: c.autoReplyEnabled,
       autoReplyMessage: c.autoReplyMessage,
+      autoReplyDepartmentId: c.autoReplyDepartmentId,
       createdAt: c.createdAt,
     }));
   }
@@ -121,15 +122,21 @@ export class ChannelsService {
     return { id: channelId, tokenUpdated: true };
   }
 
-  async updateAutoReply(tenantId: string, channelId: string, enabled: boolean, message?: string) {
+  async updateAutoReply(tenantId: string, channelId: string, enabled: boolean, message?: string, departmentId?: string | null) {
     await this.findOwnedChannel(tenantId, channelId);
     if (enabled && !message) {
       throw new ForbiddenException('Informe a mensagem de resposta automatica pra habilitar.');
     }
-    return this.prisma.channel.update({
-      select: { id: true, name: true, autoReplyEnabled: true, autoReplyMessage: true },
-      where: { id: channelId },
-      data: { autoReplyEnabled: enabled, autoReplyMessage: enabled ? message : null },
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
+      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+      if (departmentId && !(tenant.workspaceSettings as any)?.departments?.some((d: { id: string }) => d.id === departmentId)) throw new BadRequestException('Setor inexistente nesta empresa.');
+      return tx.channel.update({
+        select: { id: true, name: true, autoReplyEnabled: true, autoReplyMessage: true, autoReplyDepartmentId: true },
+        where: { id: channelId, tenantId },
+        data: { autoReplyEnabled: enabled, autoReplyMessage: enabled ? message : null,
+          ...(departmentId !== undefined ? { autoReplyDepartmentId: departmentId } : {}) },
+      });
     });
   }
 
