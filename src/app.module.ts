@@ -1,3 +1,4 @@
+import { CampaignsModule } from './campaigns/campaigns.controller';
 import { WorkspaceModule } from './workspace/workspace.controller';
 import { PrivacyModule } from './privacy/privacy.controller';
 import { Module } from '@nestjs/common';
@@ -19,6 +20,7 @@ import { BillingModule } from './billing/billing.module';
 @Module({
   imports: [
     PrismaModule,
+    CampaignsModule,
     WorkspaceModule,
     PrivacyModule,
     SecurityModule,
