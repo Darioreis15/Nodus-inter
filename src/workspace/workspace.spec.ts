@@ -24,6 +24,7 @@ describe('Customer workspace boundaries', () => {
   });
   it('rejects assigning a stage to a foreign operator before saving', async () => {
     const db: any = { user: { count: jest.fn().mockResolvedValue(0) }, tenant: { update: jest.fn() } };
+    db.$transaction = (fn:any) => fn(db); db.$queryRaw = jest.fn();
     const controller = new WorkspaceController(db);
     await expect(controller.save({ tenantId:'own' } as any, { timezone:'UTC', businessHours:weekday, awayMessage:'', stages:[{ id:'stage', name:'Sales', keyword:'sales', message:'', userId:'foreign' }] })).rejects.toBeInstanceOf(BadRequestException);
     expect(db.tenant.update).not.toHaveBeenCalled();

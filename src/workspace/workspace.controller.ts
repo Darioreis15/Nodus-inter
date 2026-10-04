@@ -21,11 +21,14 @@ export class WorkspaceController {
     if (new Set(dto.stages.map(s => s.id)).size !== dto.stages.length) throw new BadRequestException('Etapas duplicadas.');
     const keywords = dto.stages.map(s => s.keyword.trim().toLowerCase()).filter(Boolean);
     if (new Set(keywords).size !== keywords.length) throw new BadRequestException('Use palavras-chave distintas.');
-    const ids = [...new Set(dto.stages.map(s => s.userId).filter(Boolean))] as string[];
-    const count = await this.prisma.user.count({ where: { tenantId: user.tenantId, id: { in: ids } } });
-    if (count !== ids.length) throw new BadRequestException('Operador de outra empresa ou inexistente.');
-    await this.prisma.tenant.update({ where: { id: user.tenantId }, data: { workspaceSettings: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue } });
-    return dto;
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${user.tenantId} FOR UPDATE`;
+      const ids = [...new Set(dto.stages.map(s => s.userId).filter(Boolean))] as string[];
+      const count = await tx.user.count({ where: { tenantId: user.tenantId, id: { in: ids } } });
+      if (count !== ids.length) throw new BadRequestException('Operador de outra empresa ou inexistente.');
+      await tx.tenant.update({ where: { id: user.tenantId }, data: { workspaceSettings: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue } });
+      return dto;
+    });
   }
   @Patch('users/:id/availability') @Roles('ADMIN')
   async availability(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: AvailabilityDto) {

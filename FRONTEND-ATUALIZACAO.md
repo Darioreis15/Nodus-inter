@@ -80,3 +80,17 @@ Documentação consultada:
 - Não houve deploy automático nem execução contra o banco/provedores do usuário. Proxy/IP no Render permanece pendente da confirmação de infraestrutura já discutida.
 
 Os testes adicionais podem ser repetidos com Playwright e PGlite em ambiente de desenvolvimento; scripts em `tests/`. Essas ferramentas de QA não são dependências de produção.
+
+## Convite do operador por e-mail
+
+Novos cadastros em POST /users enviam o acesso pelo Resend usando as mesmas variáveis da recuperação. A senha escolhida ou gerada é enviada em texto no e-mail; somente o hash fica no banco, e a troca no primeiro acesso continua obrigatória. O envio não é retroativo. A senha temporária não tem prazo de expiração automático nesta versão.
+
+A resposta inclui invitationEmailStatus: accepted (aceito pelo provedor, não comprova entrega), failed ou not_configured. Falha de envio não desfaz o usuário nem exige recadastro. O administrador pode copiar a senha exibida uma vez ou orientar o uso de Esqueci minha senha. Não há repetição automática do envio.
+
+Publique o backend e substitua frontend/app.js e frontend/index.html na hospedagem do painel. Não há migração nem variável nova. Testes usam fetch simulado e não enviam e-mail real.
+
+## Exclusão de operadores e limite do plano
+
+ADMIN pode excluir AGENT da própria empresa em DELETE /users/:id, com confirmação no painel. Não permite excluir administradores nem o próprio acesso. A exclusão libera uma vaga; o limite maxUsers conta administradores e operadores. GET /users/limits (ADMIN) retorna uso, limite e vagas disponíveis. Cadastro/exclusão usam transação com trava na empresa para serializar mudanças de vagas e impedir cadastros concorrentes acima do limite.
+
+Conversas, mensagens, nomes de finalizadores e auditoria são preservados. Atribuições são removidas e etapas de funil deixam de apontar para o operador excluído. Tokens de recuperação são apagados por cascade; JWTs antigos são recusados na próxima requisição porque o usuário não existe mais. Sem migração. Atualizar frontend/app.js e frontend/index.html após deploy.

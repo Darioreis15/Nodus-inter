@@ -48,6 +48,7 @@ const server = http.createServer((req,res) => {
       else if(p.endsWith('/messages'))payload=messages;
       else if(p==='/workspace')payload=settings;
       else if(p==='/users'&&method==='POST')payload={...data,temporaryPassword:data.temporaryPassword||'one-time-password'};
+      else if(p==='/users/limits')payload={used:1,maxUsers:3,available:2,planName:'Starter'};
       else if(p==='/users')payload=[{...user,availability:{available:true}}];
       else if(p==='/api-keys'&&method==='POST')payload={key:'nodus_live_test',name:data.name};
       else if(p==='/api-keys')payload=[];
