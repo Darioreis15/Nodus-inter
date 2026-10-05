@@ -139,7 +139,7 @@ describe('Operator removal and seats', () => {
   beforeEach(() => {
     db = {
       $queryRaw: jest.fn(),
-      user: { findFirst: jest.fn().mockResolvedValue({ id: 'agent', role: 'AGENT' }), delete: jest.fn() },
+      user: { findFirst: jest.fn(async ({where}) => ({id:where.id,role:where.id === 'admin' ? 'ADMIN' : 'AGENT',isOwner:false})), delete: jest.fn(), update:jest.fn() },
       tenant: { findUniqueOrThrow: jest.fn().mockResolvedValue({ workspaceSettings: { timezone: 'UTC', stages: [{ id: 'sales', userId: 'agent' }, { id: 'other', userId: 'other-agent' }] } }), update: jest.fn() },
       conversation: { updateMany: jest.fn() }, auditEvent: { create: jest.fn() },
     };
@@ -159,10 +159,27 @@ describe('Operator removal and seats', () => {
     await expect(new UsersService(db).deleteOperator('own', 'admin', 'foreign')).rejects.toBeInstanceOf(NotFoundException);
     expect(db.user.delete).not.toHaveBeenCalled(); expect(db.conversation.updateMany).not.toHaveBeenCalled();
   });
-  it.each([['ADMIN','other-admin'],['AGENT','admin']])('blocks role %s and target %s', async (role, id) => {
-    db.user.findFirst.mockResolvedValue({ role, id });
+  it.each([['ADMIN','owner'],['AGENT','owner']])('protects owner with stored role %s', async (role, id) => {
+    db.user.findFirst.mockResolvedValue({ role, id, isOwner:true });
     await expect(new UsersService(db).deleteOperator('own', 'admin', id)).rejects.toBeInstanceOf(ForbiddenException);
     expect(db.user.delete).not.toHaveBeenCalled();
+  });
+  it('allows deleting a secondary administrator', async () => {
+    db.user.findFirst.mockResolvedValue({id:'secondary',role:'ADMIN',isOwner:false});
+    await new UsersService(db).deleteOperator('own','admin','secondary');
+    expect(db.user.delete).toHaveBeenCalledWith({where:{id:'secondary'}});
+  });
+  it('changes a secondary administrator role and invalidates old tokens', async () => {
+    db.user.findFirst.mockResolvedValue({id:'secondary',role:'ADMIN',isOwner:false});
+    await new UsersService(db).updateRole('own','admin','secondary','AGENT');
+    expect(db.user.update).toHaveBeenCalledWith({where:{id:'secondary'},data:{role:'AGENT',tokenVersion:{increment:1}}});
+  });
+  it('refuses role changes on the owner and a demoted actor', async () => {
+    db.user.findFirst.mockResolvedValue({role:'ADMIN',isOwner:true});
+    await expect(new UsersService(db).updateRole('own','admin','owner','AGENT')).rejects.toBeInstanceOf(ForbiddenException);
+    db.user.findFirst.mockResolvedValue({role:'AGENT'});
+    await expect(new UsersService(db).updateRole('own','admin','secondary','ADMIN')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(db.user.update).not.toHaveBeenCalled();
   });
   it('counts all seats and reports newly available seats from the database', async () => {
     db.tenant.findUniqueOrThrow.mockResolvedValue({ plan: { name: 'Starter', maxUsers: 3 }, _count: { users: 3 } });
