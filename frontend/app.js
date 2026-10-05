@@ -314,7 +314,7 @@ async function automationsPage() {
   rulesForm.insertBefore(awayOptions, $('button[type="submit"]', rulesForm));
   const stageValues = () => $$('.stage-editor').map(el => {
     const value = { id:el.dataset.id };
-    $$('[data-field]', el).forEach(input => value[input.dataset.field] = input.value);
+    $$('[data-field]', el).forEach(input => value[input.dataset.field] = input.type === 'checkbox' ? input.checked : input.value);
     return value;
   });
   const refreshStageList = () => {
@@ -328,7 +328,7 @@ async function automationsPage() {
       $('.automation-name', item).textContent = s.name || 'Nova automação';
       $('.automation-trigger', item).textContent = `${previous ? `Após ${previous.name || 'etapa sem nome'}` : 'Em qualquer etapa'} · ${s.keyword ? `Cliente responde: ${s.keyword}` : 'Sem palavra-chave: etapa manual'}`;
       $('.automation-preview', item).textContent = s.message || 'Sem mensagem automática configurada.';
-      $('.automation-destination', item).textContent = `${department ? department.name : 'Sem setor'} · ${user ? user.name : 'Manter na fila'}`;
+      $('.automation-destination', item).textContent = `${department ? department.name : 'Sem setor'} · ${s.waitForReply ? 'Aguardar resposta → fila do setor' : user ? user.name : 'Manter na fila'}`;
     });
   };
   const refreshStageSources = () => {
@@ -340,7 +340,7 @@ async function automationsPage() {
     const item = document.createElement('details'); item.className = 'automation-item'; item.open = open;
     item.innerHTML = '<summary><span class="automation-name"></span><span class="automation-trigger"></span><span class="automation-preview"></span><span class="automation-destination"></span><span class="automation-edit">Abrir / fechar edição</span></summary>';
     const fieldset = document.createElement('fieldset'); fieldset.className = 'stage-editor'; fieldset.dataset.id = s.id;
-    fieldset.innerHTML = `<legend>Editar automação</legend><label>Nome<input data-field="name" value="${escape(s.name)}" maxlength="60" required></label><label>Palavra-chave (opcional)<input data-field="keyword" value="${escape(s.keyword)}" maxlength="100" placeholder="Ex.: vendas"></label><label>Mensagem ao entrar automaticamente<textarea data-field="message" maxlength="4000" rows="3">${escape(s.message)}</textarea></label><label>Etapa anterior (opcional)<select data-field="fromStageId"><option value="">Qualquer etapa</option>${settings.stages.filter(t => t.id !== s.id).map(t => `<option value="${escape(t.id)}" ${s.fromStageId === t.id ? 'selected' : ''}>${escape(t.name)}</option>`).join('')}</select></label><label>Encaminhar para setor<select data-field="departmentId" data-department-select>${departmentOptions(settings.departments || [], s.departmentId)}</select></label><label>Atendente após a resposta<select data-field="userId"><option value="">Manter na fila</option>${users.map(u => `<option value="${escape(u.id)}" ${s.userId === u.id ? 'selected' : ''}>${escape(u.name)}</option>`).join('')}</select></label><div class="actions"><button type="button" class="outline" data-next-stage>Criar próxima etapa</button><button type="button" class="text-button danger" data-remove-stage>Remover automação</button></div>`;
+    fieldset.innerHTML = `<legend>Editar automação</legend><label>Nome<input data-field="name" value="${escape(s.name)}" maxlength="60" required></label><label>Palavra-chave (opcional)<input data-field="keyword" value="${escape(s.keyword)}" maxlength="100" placeholder="Ex.: vendas"></label><label>Mensagem ao entrar automaticamente<textarea data-field="message" maxlength="4000" rows="3">${escape(s.message)}</textarea></label><label>Etapa anterior (opcional)<select data-field="fromStageId"><option value="">Qualquer etapa</option>${settings.stages.filter(t => t.id !== s.id).map(t => `<option value="${escape(t.id)}" ${s.fromStageId === t.id ? 'selected' : ''}>${escape(t.name)}</option>`).join('')}</select></label><label>Encaminhar para setor<select data-field="departmentId" data-department-select>${departmentOptions(settings.departments || [], s.departmentId)}</select></label><label class="checkbox"><input type="checkbox" data-field="waitForReply" ${s.waitForReply ? 'checked' : ''}>Aguardar resposta livre do cliente</label><p class="muted">A mensagem acima será a pergunta. Após o cliente responder por texto, a confirmação abaixo será enviada e a conversa ficará na fila do setor, sem atribuir um atendente. O fluxo termina nesse ponto.</p><label>Confirmação após a resposta<textarea data-field="completionMessage" maxlength="4000" rows="3">${escape(s.completionMessage || 'Obrigado! Um atendente dará continuidade. Aguarde um momento.')}</textarea></label><label>Atendente (somente sem espera de resposta livre)<select data-field="userId"><option value="">Manter na fila</option>${users.map(u => `<option value="${escape(u.id)}" ${s.userId === u.id ? 'selected' : ''}>${escape(u.name)}</option>`).join('')}</select></label><div class="actions"><button type="button" class="outline" data-next-stage>Criar próxima etapa</button><button type="button" class="text-button danger" data-remove-stage>Remover automação</button></div>`;
     $('[data-remove-stage]', fieldset).onclick = () => {
       if (stageValues().some(stage => stage.fromStageId === s.id)) return notice('Esta automação tem próximas etapas. Altere a etapa anterior delas antes de remover.');
       if (!confirm('Remover esta automação? A exclusão será aplicada ao salvar automações.')) return;
@@ -361,7 +361,8 @@ async function automationsPage() {
   settings.stages.forEach(s => addStage(s)); refreshStageSources();
   $('#add-stage').onclick = () => { if (stageValues().length >= 20) return notice('Limite de 20 etapas.'); addStage(undefined, true); refreshStageSources(); $('[data-field="name"]', $$('.stage-editor').at(-1)).focus(); };
   bindForm('#automations-form', async data => {
-    const stages = $$('.stage-editor').map(el => { const s = { id:el.dataset.id }; $$('[data-field]', el).forEach(input => s[input.dataset.field] = input.value); ['userId','departmentId','fromStageId'].forEach(k => { if (!s[k]) delete s[k]; }); return s; });
+    const stages = $$('.stage-editor').map(el => { const s = { id:el.dataset.id }; $$('[data-field]', el).forEach(input => s[input.dataset.field] = input.type === 'checkbox' ? input.checked : input.value); ['userId','departmentId','fromStageId'].forEach(k => { if (!s[k]) delete s[k]; }); return s; });
+    if (stages.some(s => s.waitForReply && (!s.message.trim() || !s.completionMessage.trim() || !s.departmentId))) throw new Error('Preencha a pergunta, a confirmação e o setor nas automações que aguardam resposta livre.');
     const current = await api('/workspace');
     await api('/workspace', { method:'PATCH', body:body({ ...current, awayMessage:data.awayMessage, awayDepartmentId:data.awayDepartmentId || null, stages }) }); $$('.automation-item').forEach(item => item.open = false); $('#stage-count').textContent = `${stages.length} de 20 automações · salvas`; notice('Automações salvas.');
   });

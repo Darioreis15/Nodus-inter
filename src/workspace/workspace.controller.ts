@@ -17,6 +17,7 @@ export class WorkspaceController {
   }
   @Patch() @Roles('ADMIN')
   async save(@CurrentUser() user: AuthenticatedUser, @Body() dto: WorkspaceDto) {
+    if (dto.stages.some(s => s.waitForReply && (!s.message.trim() || !s.completionMessage?.trim() || !s.departmentId))) throw new BadRequestException('Informe pergunta, mensagem de confirmacao e setor para aguardar resposta livre.');
     try { new Intl.DateTimeFormat('pt-BR', { timeZone: dto.timezone }).format(); } catch { throw new BadRequestException('Fuso horario invalido.'); }
     if (new Set(dto.stages.map(s => s.id)).size !== dto.stages.length) throw new BadRequestException('Etapas duplicadas.');
     const keywords = dto.stages.filter(s => s.keyword.trim()).map(s => `${s.fromStageId || '*'}:${s.keyword.trim().toLowerCase()}`);

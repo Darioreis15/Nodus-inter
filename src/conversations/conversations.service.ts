@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { defaults, withinHours, WorkspaceDto, AvailabilityDto } from '../workspace/workspace.dto';
 import { StartConversationDto, TemplateMessageDto } from './dto/start-conversation.dto';
@@ -90,18 +91,34 @@ export class ConversationsService {
       const stage = candidates.find(s => s.fromStageId && s.fromStageId === conversation!.funnelStage) || candidates.find(s => !s.fromStageId);
       let reply: string | null = null;
       let departmentId: string | null | undefined;
-      if (!open) {
+      const pending = conversation.pendingAutomation as { message: string; departmentId: string } | null;
+      if (conversation.assignedUserId || conversation.automationCompleted || optOut || tenant.status !== 'ACTIVE') {
+        // Human takeover and completed flows must never restart on numeric replies.
+        if (pending && (conversation.assignedUserId || optOut)) conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { pendingAutomation: Prisma.DbNull, automationCompleted: true } });
+      } else if (pending) {
+        // Empty media events do not answer a text question. Preserve the pending step.
+        if (text.trim()) {
+          reply = pending.message;
+          departmentId = pending.departmentId;
+          conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { pendingAutomation: Prisma.DbNull, automationCompleted: true, assignedUserId: null } });
+        }
+      } else if (!open) {
         if (isNewConversation) { reply = settings.awayMessage || null; if (reply) departmentId = settings.awayDepartmentId; }
       } else if (stage && conversation.funnelStage !== stage.id) {
         let assignedUserId: string | null = null;
-        if (stage.userId) {
+        if (stage.userId && !stage.waitForReply) {
           const operator = await tx.user.findFirst({ where: { id: stage.userId, tenantId: channel.tenantId } });
           const availability = operator?.availability as unknown as AvailabilityDto;
           if (operator && availability?.available !== false && withinHours(availability, settings.timezone)) assignedUserId = operator.id;
         }
         conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { funnelStage: stage.id, assignedUserId } });
         reply = stage.message || null;
-        departmentId = stage.departmentId ?? null;
+        if (stage.waitForReply) {
+          conversation = await tx.conversation.update({ where: { id: conversation.id }, data: {
+            pendingAutomation: { message: stage.completionMessage || 'Obrigado! Aguarde um atendente.', departmentId: stage.departmentId || '' },
+            departmentId: null,
+          } });
+        } else departmentId = stage.departmentId ?? null;
       } else if (isNewConversation && channel.autoReplyEnabled) {
         reply = channel.autoReplyMessage;
         if (reply) departmentId = channel.autoReplyDepartmentId;
