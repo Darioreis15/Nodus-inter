@@ -15,5 +15,8 @@ INSERT INTO campaigns(id,tenant_id,channel_id,name,request_key,request_hash) VAL
 INSERT INTO campaign_deliveries(id,campaign_id,contact_id,step,due_at,payload) VALUES ('job','campaign','contact',0,NOW(),'{}');`);
 await assert.rejects(db.exec(`INSERT INTO campaigns(id,tenant_id,channel_id,name,request_key,request_hash) VALUES ('dup','t','ch','Test','unique-key','hash')`));
 await db.exec(`DELETE FROM contacts WHERE id='contact'`);assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM campaign_deliveries')).rows[0].n,0);
-console.log('PASS: 5 migrations; owner deterministic, owner role protected, duplicate jobs rejected, contact erasure cascades queue.');
+await db.exec(fs.readFileSync('prisma/migrations/20261005120000_free_response/migration.sql','utf8'));
+await db.exec(`INSERT INTO contacts(id,tenant_id,wa_id) VALUES ('contact2','t','5511888888888'); INSERT INTO conversations(id,channel_id,contact_id,"updatedAt") VALUES ('conv','ch','contact2',NOW());`);
+assert.deepEqual((await db.query('SELECT pending_automation, automation_completed FROM conversations')).rows,[{pending_automation:null,automation_completed:false}]);
+console.log('PASS: 6 migrations; owner deterministic, owner role protected, duplicate jobs rejected, contact erasure cascades queue.');
 }finally{await db.close();}})().catch(e=>{console.error(e);process.exitCode=1});
