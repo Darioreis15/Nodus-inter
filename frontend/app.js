@@ -154,12 +154,68 @@ function openPage(page) {
   const titles = { campaigns:['Campanhas e follow-ups','Envios agendados com acompanhamento por destinatário.'], connections:['Conexões','Gerencie os canais e números da sua empresa.'], settings:['Configurações','Sua conta, expediente e integrações.'], automations:['Automações','Mensagens automáticas e regras de atendimento.'], users:['Operadores','Acessos e disponibilidade da equipe.'], billing:['Mensalidades','Acompanhe as cobranças da sua empresa no Asaas.'], logs:['Logs de conversas','Identifique quem finalizou cada atendimento.'], funnel:['Funil de atendimento','Organize as conversas por etapa.'], reports:['Relatórios','Indicadores da sua operação.'] };
   const [title, sub] = titles[page]; const chat = $('#chat'); chat.className = 'page';
   chat.innerHTML = `<header class="page-header"><p class="eyebrow">PAINEL NODUS</p><h1>${title}</h1><p>${sub}</p></header><div class="page-content" id="page-content"><p class="loading">Carregando…</p></div>`;
-  ({ campaigns:campaignsPage, connections:connectionsPage, settings:settingsPage, automations:automationsPage, users:usersPage, billing:billingPage, logs:logsPage, funnel:funnelPage, reports:reportsPage })[page]().catch(err => { if (session.page === page) $('#page-content').textContent = err.message; });
+  ({ campaigns:campaignsPage, connections:connectionsPage, settings:settingsPage, automations:automationsPage, users:usersPage, billing:billingPage, logs:logsPage, funnel:funnelPage, reports:reportsPage })[page]().then(() => { if (session.page === page) organizePageTabs(page); }).catch(err => { if (session.page === page) $('#page-content').textContent = err.message; });
+}
+// Move existing panels rather than rendering them again: forms and handlers survive tab changes.
+function organizePageTabs(page) {
+  const root = $('#page-content');
+  if (!root || $('[role="tablist"]', root)) return;
+  let panels = [];
+  const cardFor = selector => $(selector, root)?.closest('.card');
+  if (page === 'settings') {
+    panels = [['E-mail', cardFor('#email-form')], ['Senha', cardFor('#account-password-form')],
+      ['Expediente', cardFor('#settings-form')], ['Integrações', cardFor('#key-form')]];
+  } else if (page === 'connections') {
+    panels = [['Meus canais', cardFor('#channel-list')], ['Novo canal', cardFor('#channel-form')]];
+  } else if (page === 'users') {
+    panels = [['Equipe', cardFor('#user-list')], ['Novo operador', cardFor('#user-form')]];
+  } else if (page === 'campaigns') {
+    panels = [['Campanhas', cardFor('#campaign-list')], ['Nova campanha', cardFor('#campaign-form')]];
+  } else if (page === 'automations') {
+    const departments = cardFor('#department-form');
+    const welcome = document.createElement('section'); welcome.className = 'card';
+    let node = $('#department-form', root).nextElementSibling;
+    while (node) { const next = node.nextElementSibling; welcome.append(node); node = next; }
+    panels = [['Regras e etapas', cardFor('#automations-form')], ['Setores', departments], ['Boas-vindas', welcome]];
+  } else if (page === 'reports') {
+    const cards = $$('.card', root);
+    panels = [['Atendimentos por usuário', cards[0]], ['Mensagens', cards[1]]];
+  }
+  panels = panels.filter(([, panel]) => panel);
+  if (panels.length < 2) return;
+  const tabs = document.createElement('div'); tabs.className = 'page-tabs';
+  tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', $('.page-header h1').textContent);
+  const content = document.createElement('div'); content.className = 'tab-content';
+  const select = (index, focus = false) => {
+    panels.forEach(([, panel], i) => {
+      panel.hidden = i !== index;
+      const button = tabs.children[i]; button.setAttribute('aria-selected', String(i === index)); button.tabIndex = i === index ? 0 : -1;
+    });
+    if (focus) tabs.children[index].focus();
+  };
+  panels.forEach(([label, panel], index) => {
+    const id = `${page}-panel-${index}`, button = document.createElement('button');
+    button.type = 'button'; button.id = `${id}-tab`; button.textContent = label;
+    button.setAttribute('role', 'tab'); button.setAttribute('aria-controls', id);
+    panel.id = id; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', button.id);
+    panel.tabIndex = 0;
+    button.onclick = () => select(index);
+    button.onkeydown = event => {
+      const next = { ArrowRight:(index + 1) % panels.length, ArrowLeft:(index + panels.length - 1) % panels.length, Home:0, End:panels.length - 1 }[event.key];
+      if (next !== undefined) { event.preventDefault(); select(next, true); }
+    };
+    tabs.append(button); content.append(panel);
+  });
+  // Keep report summary metrics above its detail tabs; remove only emptied layout wrappers.
+  $$('.page-grid, #account-settings', root).forEach(el => { if (!el.querySelector('.card')) el.remove(); });
+  root.append(tabs, content); select(0);
+  // Newly created items are shown immediately in their list, without reloading the page.
+  root.addEventListener('nodus:show-list', () => select(0));
 }
 async function connectionsPage() {
   $('#page-content').innerHTML = `<div class="page-grid"><section class="card"><h2>Novo canal</h2><form id="channel-form"><label>Nome<input name="name" required maxlength="100"></label><label>Conexão<select name="type" id="channel-type"><option value="QR_EVOLUTION">WhatsApp via QR Code</option><option value="OFFICIAL_META">API oficial da Meta</option></select></label><div id="meta-fields"></div><button type="submit" class="primary">Criar conexão →</button></form><p class="muted">Coexistência permite manter o WhatsApp Business no celular. O cadastro depende da elegibilidade e do fluxo oficial da Meta; ainda não está habilitado neste painel.</p></section><section class="card"><div class="section-title"><h2>Meus canais</h2><button id="reload-channels" class="outline">Atualizar lista</button></div><div id="channel-list"></div></section></div>`;
   $('#channel-type').onchange = e => { $('#meta-fields').innerHTML = e.target.value === 'OFFICIAL_META' ? '<label>Phone Number ID<input name="phoneNumberId" required></label><label>Token de acesso<input name="accessToken" type="password" autocomplete="off" required></label><label>WABA ID<input name="wabaId"></label>' : ''; };
-  bindForm('#channel-form', async (data, form) => { if (!data.wabaId) delete data.wabaId; await api('/channels', { method:'POST', body:body(data) }); form.reset(); $('#meta-fields').innerHTML = ''; await drawChannels(); notice('Canal criado. Ele já está disponível na lista.'); });
+  bindForm('#channel-form', async (data, form) => { if (!data.wabaId) delete data.wabaId; await api('/channels', { method:'POST', body:body(data) }); form.reset(); $('#meta-fields').innerHTML = ''; await drawChannels(); $('#page-content').dispatchEvent(new Event('nodus:show-list')); notice('Canal criado. Ele já está disponível na lista.'); });
   $('#reload-channels').onclick = e => busy(e.currentTarget, drawChannels);
   await drawChannels();
 }
@@ -195,7 +251,7 @@ function scheduleFields(s = {}, prefix = '') {
 function scheduleData(data, prefix = '') { return { enabled:data[`${prefix}enabled`] === 'on', days:[0,1,2,3,4,5,6].filter(i => data[`${prefix}day${i}`] === 'on'), start:data[`${prefix}start`], end:data[`${prefix}end`] }; }
 async function usersPage() {
   $('#page-content').innerHTML = '<div class="page-grid"><section class="card"><h2>Novo operador</h2><form id="user-form"><label>Nome<input name="name" minlength="2" required></label><label>E-mail<input name="email" type="email" required></label><label>Perfil<select name="role"><option value="AGENT">Operador</option><option value="ADMIN">Administrador</option></select></label><label>Senha temporária (opcional)<input name="temporaryPassword" type="password" minlength="12" autocomplete="new-password" placeholder="Deixe vazio para gerar automaticamente"></label><p class="muted">O acesso será enviado por e-mail. A senha também será exibida uma única vez. A troca é obrigatória no primeiro acesso.</p><button class="primary" type="submit">Criar acesso</button></form></section><section class="card"><h2>Equipe</h2><p id="user-limits" class="muted"></p><div id="user-list"></div></section></div>';
-  bindForm('#user-form', async (data, form) => { data.email = data.email.trim().toLowerCase(); if (!data.temporaryPassword) delete data.temporaryPassword; const result = await api('/users', { method:'POST', body:body(data) }); form.reset(); secretDialog('Acesso criado', result.temporaryPassword, result.invitationEmailStatus === 'accepted' ? `O Resend aceitou o envio do acesso para ${result.email}. Confira a caixa de entrada e o spam. A troca da senha é obrigatória.` : `O usuário foi criado, mas o envio por e-mail ${result.invitationEmailStatus === 'not_configured' ? 'não está configurado' : 'não foi confirmado'}. Repasse esta senha a ${result.email} por um canal privado ou use Esqueci minha senha. Não cadastre o usuário novamente.`); await drawUsers(); });
+  bindForm('#user-form', async (data, form) => { data.email = data.email.trim().toLowerCase(); if (!data.temporaryPassword) delete data.temporaryPassword; const result = await api('/users', { method:'POST', body:body(data) }); form.reset(); secretDialog('Acesso criado', result.temporaryPassword, result.invitationEmailStatus === 'accepted' ? `O Resend aceitou o envio do acesso para ${result.email}. Confira a caixa de entrada e o spam. A troca da senha é obrigatória.` : `O usuário foi criado, mas o envio por e-mail ${result.invitationEmailStatus === 'not_configured' ? 'não está configurado' : 'não foi confirmado'}. Repasse esta senha a ${result.email} por um canal privado ou use Esqueci minha senha. Não cadastre o usuário novamente.`); await drawUsers(); $('#page-content').dispatchEvent(new Event('nodus:show-list')); });
   await drawUsers();
 }
 async function drawUsers() {
@@ -314,7 +370,7 @@ async function campaignsPage() {
     if (!steps.length || !recipients.length || recipients.length > 100) throw new Error('Adicione de 1 a 100 destinatários e pelo menos uma etapa.');
     const payload = {name:data.name,channelId:data.channelId,requestKey:crypto.randomUUID(),scheduledAt:new Date(data.scheduledAt).toISOString(),consentConfirmed:data.consentConfirmed === 'on',stopOnReply:data.stopOnReply === 'on',recipients,steps};
     modal('Confirmar campanha', `<p><strong>${escape(data.name)}</strong></p><p>${recipients.length} destinatário(s), ${steps.length} etapa(s), ${recipients.length*steps.length} envio(s) previstos.</p><p>Início: ${escape(new Date(payload.scheduledAt).toLocaleString('pt-BR'))}. A confirmação coloca os envios na fila.</p><p>${payload.stopOnReply ? 'Respostas interrompem a sequência.' : 'A sequência continua após respostas; pedidos de saída são sempre respeitados.'}</p><button class="primary" id="confirm-campaign">Confirmar e agendar</button>`);
-    $('#confirm-campaign').onclick = e => busy(e.currentTarget, async () => { await api('/campaigns',{method:'POST',body:body(payload)}); $('#modal').close(); notice('Campanha registrada na fila.'); await drawCampaigns(); });
+    $('#confirm-campaign').onclick = e => busy(e.currentTarget, async () => { await api('/campaigns',{method:'POST',body:body(payload)}); $('#modal').close(); notice('Campanha registrada na fila.'); await drawCampaigns(); $('#page-content').dispatchEvent(new Event('nodus:show-list')); });
   });
   $('#refresh-campaigns').onclick = () => drawCampaigns(); await drawCampaigns();
 }
