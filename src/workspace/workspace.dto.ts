@@ -14,6 +14,8 @@ export class DepartmentDto {
   @IsString() @MinLength(1) @MaxLength(60) name: string;
 }
 export class FunnelStageDto {
+  @IsOptional() @IsBoolean() waitForReply?: boolean;
+  @IsOptional() @IsString() @MaxLength(4000) completionMessage?: string;
   @IsOptional() @IsUUID() fromStageId?: string;
   @IsOptional() @IsUUID() departmentId?: string;
   @IsUUID() id: string;
