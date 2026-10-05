@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 
-type RetentionDb = Pick<PrismaClient, 'message' | 'rateBucket' | 'providerEvent' | 'auditEvent'>;
+type RetentionDb = Pick<PrismaClient, 'message' | 'rateBucket' | 'providerEvent' | 'auditEvent' | 'campaignDelivery'>;
 
 export async function runRetention(db: RetentionDb, env: NodeJS.ProcessEnv, now = new Date()) {
   const messageDays = Number(env.MESSAGE_RETENTION_DAYS);
@@ -21,6 +21,7 @@ export async function runRetention(db: RetentionDb, env: NodeJS.ProcessEnv, now 
   const buckets = { expiresAt: { lt: now } };
   const providers = { createdAt: { lt: providerCutoff } };
   const audits = { createdAt: { lt: auditCutoff } };
+  const deliveries = { status:{notIn:['QUEUED','SENDING']}, finishedAt:{lt:messageCutoff}, contact:{legalHold:false}, campaign:{deliveries:{none:{status:{in:['QUEUED','SENDING']}}}} };
   const apply = env.APPLY_RETENTION === 'true';
   const counts = apply ? [
     (await db.message.deleteMany({ where: messages })).count,
@@ -28,12 +29,14 @@ export async function runRetention(db: RetentionDb, env: NodeJS.ProcessEnv, now 
     (await db.rateBucket.deleteMany({ where: buckets })).count,
     (await db.providerEvent.deleteMany({ where: providers })).count,
     (await db.auditEvent.deleteMany({ where: audits })).count,
+    (await db.campaignDelivery.deleteMany({ where: deliveries })).count,
   ] : await Promise.all([
     db.message.count({ where: messages }),
     db.message.count({ where: raw }),
     db.rateBucket.count({ where: buckets }),
     db.providerEvent.count({ where: providers }),
     db.auditEvent.count({ where: audits }),
+    db.campaignDelivery.count({ where: deliveries }),
   ]);
   return {
     mode: apply ? 'APPLIED' : 'DRY_RUN',
@@ -41,7 +44,7 @@ export async function runRetention(db: RetentionDb, env: NodeJS.ProcessEnv, now 
     cutoffs: { messages: messageCutoff.toISOString(), auditEvents: auditCutoff.toISOString(), providerEvents: providerCutoff.toISOString() },
     counts: {
       messages: counts[0], rawPayloads: counts[1], expiredRateBuckets: counts[2],
-      providerEvents: counts[3], auditEvents: counts[4],
+      providerEvents: counts[3], auditEvents: counts[4], campaignDeliveries: counts[5],
     },
   };
 }

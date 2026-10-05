@@ -48,7 +48,7 @@ export class ChannelsController {
     @Param('id') id: string,
     @Body() dto: UpdateAutoReplyDto,
   ) {
-    return this.channelsService.updateAutoReply(user.tenantId, id, dto.enabled, dto.message);
+    return this.channelsService.updateAutoReply(user.tenantId, id, dto.enabled, dto.message, dto.departmentId);
   }
 
   @Roles('ADMIN') @Post(':id/refresh')

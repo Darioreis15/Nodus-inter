@@ -9,7 +9,13 @@ export class ScheduleDto {
 export class AvailabilityDto extends ScheduleDto {
   @IsBoolean() available: boolean;
 }
+export class DepartmentDto {
+  @IsUUID() id: string;
+  @IsString() @MinLength(1) @MaxLength(60) name: string;
+}
 export class FunnelStageDto {
+  @IsOptional() @IsUUID() fromStageId?: string;
+  @IsOptional() @IsUUID() departmentId?: string;
   @IsUUID() id: string;
   @IsString() @MinLength(1) @MaxLength(60) name: string;
   @IsString() @MaxLength(100) keyword: string;
@@ -17,12 +23,14 @@ export class FunnelStageDto {
   @IsOptional() @IsUUID() userId?: string;
 }
 export class WorkspaceDto {
+  @IsOptional() @IsArray() @ArrayMaxSize(30) @ValidateNested({ each: true }) @Type(() => DepartmentDto) departments?: DepartmentDto[];
+  @IsOptional() @IsUUID() awayDepartmentId?: string | null;
   @IsString() @MaxLength(80) timezone: string;
   @IsDefined() @ValidateNested() @Type(() => ScheduleDto) businessHours: ScheduleDto;
   @IsString() @MaxLength(4000) awayMessage: string;
   @IsArray() @ArrayMaxSize(20) @ValidateNested({ each: true }) @Type(() => FunnelStageDto) stages: FunnelStageDto[];
 }
-export const defaults = { timezone: 'America/Sao_Paulo', businessHours: { enabled: false, days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' }, awayMessage: '', stages: [] };
+export const defaults = { timezone: 'America/Sao_Paulo', businessHours: { enabled: false, days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' }, awayMessage: '', awayDepartmentId: null, departments: [], stages: [] };
 export function withinHours(schedule: ScheduleDto | undefined, timezone: string, now = new Date()): boolean {
   if (!schedule?.enabled) return true;
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);

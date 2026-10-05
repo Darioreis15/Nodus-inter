@@ -1,0 +1,19 @@
+const {PGlite}=require('@electric-sql/pglite');
+const fs=require('node:fs');const assert=require('node:assert/strict');
+(async()=>{const db=new PGlite();try{
+for(const name of ['20260925000000_baseline','20260926000000_security','20261003040000_customer_workspace'])await db.exec(fs.readFileSync(`prisma/migrations/${name}/migration.sql`,'utf8'));
+await db.exec(`INSERT INTO plans(id,name,slug) VALUES ('p','Test','test');
+INSERT INTO tenants(id,name,slug,plan_id,"updatedAt") VALUES ('t','Test','test','p',NOW());
+INSERT INTO users(id,tenant_id,name,email,password_hash,role,"createdAt","updatedAt") VALUES ('u','t','First','first@example.com','hash','ADMIN','2026-01-01',NOW()),('v','t','Second','second@example.com','hash','ADMIN','2026-01-02',NOW());`);
+for(const name of ['20261004160000_owner_departments','20261004170000_campaigns'])await db.exec(fs.readFileSync(`prisma/migrations/${name}/migration.sql`,'utf8'));
+assert.deepEqual((await db.query('SELECT id,is_owner FROM users ORDER BY id')).rows,[{id:'u',is_owner:true},{id:'v',is_owner:false}]);
+await assert.rejects(db.exec(`UPDATE users SET role='AGENT' WHERE id='u'`));
+await assert.rejects(db.exec(`UPDATE users SET is_owner=true WHERE id='v'`));
+await db.exec(`INSERT INTO channels(id,tenant_id,name,type,"updatedAt") VALUES ('ch','t','Test','QR_EVOLUTION',NOW());
+INSERT INTO contacts(id,tenant_id,wa_id) VALUES ('contact','t','5511999999999');
+INSERT INTO campaigns(id,tenant_id,channel_id,name,request_key,request_hash) VALUES ('campaign','t','ch','Test','unique-key','hash');
+INSERT INTO campaign_deliveries(id,campaign_id,contact_id,step,due_at,payload) VALUES ('job','campaign','contact',0,NOW(),'{}');`);
+await assert.rejects(db.exec(`INSERT INTO campaigns(id,tenant_id,channel_id,name,request_key,request_hash) VALUES ('dup','t','ch','Test','unique-key','hash')`));
+await db.exec(`DELETE FROM contacts WHERE id='contact'`);assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM campaign_deliveries')).rows[0].n,0);
+console.log('PASS: 5 migrations; owner deterministic, owner role protected, duplicate jobs rejected, contact erasure cascades queue.');
+}finally{await db.close();}})().catch(e=>{console.error(e);process.exitCode=1});

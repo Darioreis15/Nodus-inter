@@ -1,3 +1,4 @@
+import { ConversationDepartmentDto } from './dto/department.dto';
 import { StartConversationDto, ContactNameDto, StageDto, TemplateMessageDto } from './dto/start-conversation.dto';
 import { Delete, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -28,6 +29,11 @@ export class ConversationsController {
   stage(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: StageDto) {
     return this.conversationsService.setStage(user.tenantId, id, dto.stageId);
   }
+  @Patch(':id/department')
+  department(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ConversationDepartmentDto) {
+    return this.conversationsService.setDepartment(user.tenantId, id, dto.departmentId);
+  }
+
   @Delete(':id')
   remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.conversationsService.remove(user.tenantId, id, user.userId);
@@ -39,9 +45,10 @@ export class ConversationsController {
     @Query('cursor') cursor?: string,
     @Query('status') status?: 'OPEN' | 'PENDING' | 'RESOLVED',
     @Query('mine') mine?: string,
+    @Query('departmentId') departmentId?: string,
   ) {
     return this.conversationsService.listForTenant(user.tenantId, {
-      status, cursor,
+      status, cursor, departmentId,
       assignedUserId: mine === 'true' ? user.userId : undefined,
     });
   }

@@ -11,6 +11,7 @@ describe('ConversationsService', () => {
 
   beforeEach(() => {
     prisma = {
+      campaignDelivery:{updateMany:jest.fn()}, campaignSuppression:{upsert:jest.fn()},
       tenant: { findUniqueOrThrow: jest.fn().mockResolvedValue({ status: "ACTIVE", workspaceSettings: {} }) },
       contact: { findUnique: jest.fn(), create: jest.fn() },
       conversation: {

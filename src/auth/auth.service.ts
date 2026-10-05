@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RegisterTenantDto } from './dto/register-tenant.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { ChangeEmailDto } from './dto/change-email.dto';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 
 function slugify(value: string): string {
@@ -65,6 +66,7 @@ export class AuthService {
             email: dto.adminEmail,
             passwordHash,
             role: 'ADMIN',
+            isOwner: true,
             mustChangePassword: false, // ja definiu a propria senha no cadastro
           },
         },
@@ -139,6 +141,29 @@ export class AuthService {
     return { message: 'Senha atualizada com sucesso.' };
   }
 
+  async changeEmail(authUser: AuthenticatedUser, dto: ChangeEmailDto) {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: authUser.userId } });
+    if (user.tenantId !== authUser.tenantId || !await bcrypt.compare(dto.currentPassword, user.passwordHash)) {
+      throw new UnauthorizedException('Senha atual incorreta.');
+    }
+    if (email === user.email) return { updated: false };
+    try {
+      await this.prisma.$transaction(async tx => {
+        // Optimistic check prevents an old session from racing a password/email change.
+        const result = await tx.user.updateMany({ where: { id: user.id, tokenVersion: user.tokenVersion, passwordHash: user.passwordHash },
+          data: { email, tokenVersion: { increment: 1 } } });
+        if (!result.count) throw new UnauthorizedException('Sessao alterada. Entre novamente.');
+        await tx.passwordReset.deleteMany({ where: { userId: user.id } });
+        await tx.auditEvent.create({ data: { tenantId: user.tenantId, actorId: user.id, action: 'account.email_changed' } });
+      });
+    } catch (error) {
+      if ((error as any)?.code === 'P2002') throw new ConflictException('Este e-mail ja esta em uso.');
+      throw error;
+    }
+    return { updated: true };
+  }
+
   async logoutAll(user: AuthenticatedUser) {
     await this.prisma.user.update({ where: { id: user.userId }, data: { tokenVersion: { increment: 1 } } });
     return { revoked: true };
@@ -172,12 +197,14 @@ export class AuthService {
     email: string;
     role: string;
     mustChangePassword: boolean;
+    isOwner?: boolean;
   }) {
     return {
       id: user.id,
       name: user.name,
       email: user.email,
       role: user.role,
+      isOwner: user.isOwner === true,
       mustChangePassword: user.mustChangePassword,
     };
   }

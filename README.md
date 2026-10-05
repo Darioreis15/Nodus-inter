@@ -329,3 +329,11 @@ Teste no Postman apos o deploy:
 6. Repita o bloqueio com uma chave existente em `/public/v1/conversations`.
 
 Nao ha alteracao de schema ou seed nesta melhoria. Basta publicar o codigo.
+
+### Contas, setores e campanhas (outubro/2026)
+
+O cadastro mais antigo existente de cada empresa passa a ser o administrador principal protegido; demais perfis podem ser alterados/excluídos. Configurações oferece troca pessoal de e-mail/senha, e Automações permite setores e transições condicionadas à etapa anterior.
+
+Campanhas e follow-ups persistem no PostgreSQL, com endpoints de sessão e `/public/v1/campaigns` para integrações por chave. A API pública também permite iniciar conversas e enviar templates. Consulte [o guia completo](docs/GUIA-AUTOMACOES-CAMPANHAS.md) para publicação, variáveis, exemplos de boleto, idempotência e validação. O processamento requer `CAMPAIGNS_WORKER_ENABLED=true` e processo continuamente ativo para pontualidade. Por padrão a fila não despacha.
+
+A coexistência da Meta permanece uma integração futura condicionada ao onboarding oficial; veja [viabilidade e roteiro de testes](docs/COEXISTENCIA-META.md).

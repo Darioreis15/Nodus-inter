@@ -23,7 +23,7 @@ describe('Workspace HTTP authorization', () => {
   beforeEach(()=>{role='ADMIN';status='ACTIVE';});
   afterAll(async()=>app.close());
   it('requires a session',async()=>{await request(app.getHttpServer()).get('/workspace').expect(401);});
-  it.each([['patch','/workspace'],['patch','/workspace/users/foreign/availability'],['delete','/users/11111111-1111-4111-8111-111111111111'],['get','/users/limits'],['delete','/channels/foreign'],['post','/channels/foreign/restart'],['get','/billing/payments']])('rejects agent %s %s',async(method,path)=>{
+  it.each([['get','/campaigns'],['post','/campaigns'],['patch','/users/11111111-1111-4111-8111-111111111111/role'],['patch','/workspace'],['patch','/workspace/users/foreign/availability'],['delete','/users/11111111-1111-4111-8111-111111111111'],['get','/users/limits'],['delete','/channels/foreign'],['post','/channels/foreign/restart'],['get','/billing/payments']])('rejects agent %s %s',async(method,path)=>{
     role='AGENT';await (request(app.getHttpServer()) as any)[method](path).auth(token,{type:'bearer'}).send({}).expect(403);
   });
   it('permits suspended admin billing but keeps conversations blocked',async()=>{

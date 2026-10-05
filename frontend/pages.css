@@ -85,3 +85,5 @@
 
 .chat:not(.empty){display:flex;flex-direction:column;min-height:0}.chat:not(.empty) .messages{flex:1;min-height:0}.chat .chat-header,.chat .composer{flex-shrink:0}.inbox{overflow:auto}.conversation-list{display:block}.toast{z-index:100;max-width:90vw}.chat-actions .outline{display:inline-block}
 @media(max-width:580px){.shell>.chat.mobile-open{height:100%;min-height:0}.chat .composer{min-height:70px}}
+
+.card form+h2{margin-top:28px}.search select{min-width:0;max-width:100%;background:var(--bg-alt);color:var(--text);border:1px solid var(--line);border-radius:5px;padding:6px}

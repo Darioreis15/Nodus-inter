@@ -20,6 +20,7 @@ export class UsersService {
       name: u.name,
       email: u.email,
       role: u.role,
+      isOwner: u.isOwner,
       mustChangePassword: u.mustChangePassword,
       createdAt: u.createdAt,
       availability: u.availability,
@@ -86,7 +87,8 @@ export class UsersService {
       await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
       const target = await tx.user.findFirst({ where: { id, tenantId } });
       if (!target) throw new NotFoundException('Operador nao encontrado.');
-      if (id === actorId || target.role !== 'AGENT') throw new ForbiddenException('Somente operadores podem ser excluidos. Administradores e seu proprio acesso sao preservados.');
+      if (target.isOwner) throw new ForbiddenException('O administrador principal nao pode ser excluido.');
+      await this.assertAdmin(tx, tenantId, actorId);
       await tx.conversation.updateMany({ where: { assignedUserId: id, channel: { tenantId } }, data: { assignedUserId: null } });
       const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
       const settings = JSON.parse(JSON.stringify(tenant.workspaceSettings || {}));
@@ -101,6 +103,24 @@ export class UsersService {
       await tx.user.delete({ where: { id } });
       await tx.auditEvent.create({ data: { tenantId, actorId, action: `user.deleted:${id}` } });
       return { deleted: true };
+    });
+  }
+
+  private async assertAdmin(tx: any, tenantId: string, actorId: string) {
+    const actor = await tx.user.findFirst({ where: { id: actorId, tenantId } });
+    if (actor?.role !== 'ADMIN') throw new ForbiddenException('Acesso restrito a administradores.');
+  }
+
+  async updateRole(tenantId: string, actorId: string, id: string, role: 'ADMIN' | 'AGENT') {
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
+      await this.assertAdmin(tx, tenantId, actorId);
+      const target = await tx.user.findFirst({ where: { id, tenantId } });
+      if (!target) throw new NotFoundException('Usuario nao encontrado.');
+      if (target.isOwner) throw new ForbiddenException('O perfil do administrador principal nao pode ser alterado.');
+      await tx.user.update({ where: { id }, data: { role, tokenVersion: { increment: 1 } } });
+      await tx.auditEvent.create({ data: { tenantId, actorId, action: `user.role_changed:${id}:${role}` } });
+      return { id, role };
     });
   }
 

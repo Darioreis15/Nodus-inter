@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Post, Delete, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Delete, Patch, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { UsersService } from './users.service';
+import { UpdateRoleDto } from './dto/update-role.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -25,6 +26,12 @@ export class UsersController {
   @Get('limits')
   limits(@CurrentUser() user: AuthenticatedUser) {
     return this.usersService.limitsForTenant(user.tenantId);
+  }
+
+  @Roles('ADMIN')
+  @Patch(':id/role')
+  role(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateRoleDto) {
+    return this.usersService.updateRole(user.tenantId, user.userId, id, dto.role);
   }
 
   @Roles('ADMIN')
