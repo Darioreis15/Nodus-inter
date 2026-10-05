@@ -23,7 +23,7 @@ describe('Customer workspace boundaries', () => {
     expect(withinHours(shift, 'UTC', new Date('2026-10-05T03:00:00Z'))).toBe(false);
   });
   it('rejects assigning a stage to a foreign operator before saving', async () => {
-    const db: any = { user: { count: jest.fn().mockResolvedValue(0) }, tenant: { update: jest.fn() } };
+    const db: any = { user: { count: jest.fn().mockResolvedValue(0) }, tenant: { update: jest.fn(), findUniqueOrThrow:jest.fn().mockResolvedValue({workspaceSettings:{}}) } };
     db.$transaction = (fn:any) => fn(db); db.$queryRaw = jest.fn();
     const controller = new WorkspaceController(db);
     await expect(controller.save({ tenantId:'own' } as any, { timezone:'UTC', businessHours:weekday, awayMessage:'', stages:[{ id:'stage', name:'Sales', keyword:'sales', message:'', userId:'foreign' }] })).rejects.toBeInstanceOf(BadRequestException);
@@ -113,6 +113,7 @@ describe('Inbound routing and names', () => {
   function setup(available:boolean, hours:any={enabled:false}, tenantStatus='ACTIVE') {
     const conversation:any={id:'conv',status:'OPEN',funnelStage:null};
     const db:any={
+      campaignDelivery:{updateMany:jest.fn()}, campaignSuppression:{upsert:jest.fn()},
       $queryRaw:jest.fn(), contact:{upsert:jest.fn().mockResolvedValue({id:'contact',name:null,waId:'5511999999999'}),updateMany:jest.fn()},
       conversation:{findFirst:jest.fn().mockResolvedValue(null),create:jest.fn().mockResolvedValue(conversation),update:jest.fn(async({data}:any)=>({...conversation,...data}))},
       message:{findFirst:jest.fn().mockResolvedValue(null),create:jest.fn().mockResolvedValue({id:'message'})},
@@ -139,6 +140,22 @@ describe('Inbound routing and names', () => {
     const {db,evo,service}=setup(true,{enabled:true,days:[],start:'08:00',end:'18:00'});
     await service.recordInboundMessage(channel,'5511999999999','sales','external',{});
     expect(db.user.findFirst).not.toHaveBeenCalled();expect(evo.sendText).toHaveBeenCalledWith(channel,{to:'5511999999999',text:'Closed'});
+  });
+  it('selects contextual steps before global keywords and persists the chosen department',async()=>{
+    const {db,service}=setup(true);
+    db.conversation.findFirst.mockResolvedValue({id:'conv',funnelStage:'initial'});
+    let state:any={id:'conv',funnelStage:'initial'};
+    db.conversation.update.mockImplementation(async ({data}:any)=>(state={...state,...data}));
+    db.tenant.findUniqueOrThrow.mockResolvedValue({status:'ACTIVE',workspaceSettings:{timezone:'UTC',businessHours:{enabled:false},stages:[{...stage,id:'global',keyword:'1'},{...stage,id:'final',keyword:'1',fromStageId:'initial',departmentId:'finance'}],departments:[{id:'finance',name:'Financeiro'}]}});
+    await service.recordInboundMessage(channel,'5511999999999','1','external',{});
+    expect(db.conversation.update).toHaveBeenCalledWith({where:{id:'conv'},data:{funnelStage:'final',assignedUserId:'operator'}});
+    expect(db.conversation.update).toHaveBeenCalledWith({where:{id:'conv'},data:{departmentId:'finance'}});
+  });
+  it('records an opt-out, stops all queued campaigns and avoids an automated reply',async()=>{
+    const {db,evo,service}=setup(true);await service.recordInboundMessage(channel,'5511999999999','SAIR','external',{});
+    expect(db.campaignSuppression.upsert).toHaveBeenCalled();
+    expect(db.campaignDelivery.updateMany).toHaveBeenCalledWith(expect.objectContaining({where:{contactId:'contact',status:'QUEUED',campaign:{tenantId:'tenant'}}}));
+    expect(evo.sendText).not.toHaveBeenCalled();
   });
   it('does not auto-send for a suspended company',async()=>{
     const {evo,service}=setup(true,{enabled:false},'SUSPENDED');await service.recordInboundMessage(channel,'5511999999999','sales','external',{});expect(evo.sendText).not.toHaveBeenCalled();
