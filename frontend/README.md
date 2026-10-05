@@ -7,3 +7,5 @@ Veja `../FRONTEND-ATUALIZACAO.md` para implantação, variáveis do e-mail, CORS
 A URL pública do backend é definida em `index.html`. Não adicione segredos aqui.
 
 Atualização v9: conta pessoal, administrador principal protegido, setores, etapas condicionais e campanhas/follow-ups. Publique o backend e suas duas novas migrações antes de substituir este frontend. O guia está em `docs/GUIA-AUTOMACOES-CAMPANHAS.md` no repositório/pacote. Para campanhas, ative `CAMPAIGNS_WORKER_ENABLED=true` no backend apenas depois de revisar os agendamentos de teste.
+
+Atualização v10: abas em Configurações (E-mail, Senha, Expediente, Integrações), Conexões, Operadores, Automações, Campanhas e Relatórios. Alternar abas preserva os formulários. Setas, Home e End navegam pelo teclado. Esta atualização visual não exige nova migração; mantenha o backend v9 já publicado. Na Hostinger substitua o conteúdo do frontend e recarregue a página.
