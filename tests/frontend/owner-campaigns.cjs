@@ -85,9 +85,9 @@ const server = http.createServer((req,res) => {
     await second.locator('[data-next-stage]').click();
     const third=page.locator('.stage-editor').nth(2);
     assert.equal(await third.locator('[data-field=fromStageId]').inputValue(),await second.getAttribute('data-id'));
-    await third.locator('[data-field=name]').fill('Segunda via');await third.locator('[data-field=keyword]').fill('boleto');await third.locator('[data-field=message]').fill('Nosso financeiro vai ajudar.');
+    await third.locator('[data-field=waitForReply]').check();await third.locator('[data-field=completionMessage]').fill('Aguarde o financeiro.');await third.locator('[data-field=departmentId]').selectOption(dept);await third.locator('[data-field=name]').fill('Segunda via');await third.locator('[data-field=keyword]').fill('boleto');await third.locator('[data-field=message]').fill('Nosso financeiro vai ajudar.');
     await page.locator('#automations-form button.primary').click();await page.getByText('Automações salvas.',{exact:true}).waitFor();
-    assert.equal(await page.locator('.automation-item[open]').count(),0);assert.equal(await page.locator('.automation-item').count(),3);assert.equal(settings.stages[2].fromStageId,settings.stages[1].id);await page.screenshot({path:path.join(screenshotDir,'automations-list-v11.png')});
+    assert.equal(await page.locator('.automation-item[open]').count(),0);assert.equal(await page.locator('.automation-item').count(),3);assert.equal(settings.stages[2].fromStageId,settings.stages[1].id);assert.equal(settings.stages[2].waitForReply,true);assert.equal(settings.stages[2].completionMessage,'Aguarde o financeiro.');await page.screenshot({path:path.join(screenshotDir,'automations-list-v11.png')});
     assert.equal(settings.stages[1].fromStageId,settings.stages[0].id);assert.equal(settings.stages[1].departmentId,dept);assert.equal(settings.stages[1].userId,'admin');
     await page.getByRole('tab',{name:'Boas-vindas',exact:true}).click();await page.locator('[data-auto-channel]').click();await page.locator('#auto-form [name=departmentId]').selectOption(dept);await page.locator('#auto-form button').click();await page.locator('#modal').waitFor({state:'hidden'});
     assert.ok(requests.some(r=>r.p.endsWith('/auto-reply')&&r.data.departmentId===dept));
