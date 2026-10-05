@@ -79,10 +79,15 @@ const server = http.createServer((req,res) => {
     await page.locator('[data-page=automations]').click();await page.getByRole('tab',{name:'Setores',exact:true}).click();await page.locator('#department-form').waitFor();
     await page.locator('#add-department').click();await page.locator('#department-fields input').fill('Financeiro');await page.locator('#department-form button.primary').click();await page.getByText('Setores salvos.',{exact:false}).waitFor();
     const dept=settings.departments[0].id;
-    await page.getByRole('tab',{name:'Regras e etapas',exact:true}).click();await page.locator('#add-stage').click();const second=page.locator('.stage-editor').nth(1);
+    await page.getByRole('tab',{name:'Regras e etapas',exact:true}).click();assert.equal(await page.locator('.automation-item[open]').count(),0);await page.locator('#add-stage').click();const second=page.locator('.stage-editor').nth(1);
     await second.locator('[data-field=name]').fill('Atendimento financeiro');await second.locator('[data-field=keyword]').fill('1');await second.locator('[data-field=message]').fill('Encaminhando para Ana.');
     await second.locator('[data-field=fromStageId]').selectOption(settings.stages[0].id);await second.locator('[data-field=departmentId]').selectOption(dept);await second.locator('[data-field=userId]').selectOption('admin');
+    await second.locator('[data-next-stage]').click();
+    const third=page.locator('.stage-editor').nth(2);
+    assert.equal(await third.locator('[data-field=fromStageId]').inputValue(),await second.getAttribute('data-id'));
+    await third.locator('[data-field=name]').fill('Segunda via');await third.locator('[data-field=keyword]').fill('boleto');await third.locator('[data-field=message]').fill('Nosso financeiro vai ajudar.');
     await page.locator('#automations-form button.primary').click();await page.getByText('Automações salvas.',{exact:true}).waitFor();
+    assert.equal(await page.locator('.automation-item[open]').count(),0);assert.equal(await page.locator('.automation-item').count(),3);assert.equal(settings.stages[2].fromStageId,settings.stages[1].id);await page.screenshot({path:path.join(screenshotDir,'automations-list-v11.png')});
     assert.equal(settings.stages[1].fromStageId,settings.stages[0].id);assert.equal(settings.stages[1].departmentId,dept);assert.equal(settings.stages[1].userId,'admin');
     await page.getByRole('tab',{name:'Boas-vindas',exact:true}).click();await page.locator('[data-auto-channel]').click();await page.locator('#auto-form [name=departmentId]').selectOption(dept);await page.locator('#auto-form button').click();await page.locator('#modal').waitFor({state:'hidden'});
     assert.ok(requests.some(r=>r.p.endsWith('/auto-reply')&&r.data.departmentId===dept));
