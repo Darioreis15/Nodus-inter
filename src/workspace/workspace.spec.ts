@@ -124,6 +124,35 @@ describe('Inbound routing and names', () => {
     const service=new ConversationsService(db,unused,evo,unused,{dispatch:jest.fn().mockResolvedValue(undefined)} as any);
     return {db,evo,service};
   }
+  it('waits for free text, routes once and stops after handoff', async () => {
+    const {db,evo,service}=setup(true);
+    let state:any={id:'conv',status:'OPEN',funnelStage:null,assignedUserId:null,automationCompleted:false,pendingAutomation:null};
+    db.conversation.findFirst.mockImplementation(async()=>state);
+    db.conversation.update.mockImplementation(async({data}:any)=>(state={...state,...data}));
+    db.tenant.findUniqueOrThrow.mockResolvedValue({status:'ACTIVE',workspaceSettings:{timezone:'UTC',businessHours:{enabled:false},departments:[{id:'finance',name:'Financeiro'}],stages:[{...stage,keyword:'1',message:'Qual sua dúvida?',waitForReply:true,completionMessage:'Aguarde o Financeiro.',departmentId:'finance'}]}});
+    await service.recordInboundMessage(channel,'5511999999999','1','first',{});
+    expect(state.pendingAutomation).toEqual({message:'Aguarde o Financeiro.',departmentId:'finance'});
+    expect(state.departmentId).toBeNull();expect(state.assignedUserId).toBeNull();
+    expect(evo.sendText).toHaveBeenLastCalledWith(channel,{to:'5511999999999',text:'Qual sua dúvida?'});
+    await service.recordInboundMessage(channel,'5511999999999','','media',{});
+    expect(evo.sendText).toHaveBeenCalledTimes(1);
+    await service.recordInboundMessage(channel,'5511999999999','Preciso do boleto','second',{});
+    expect(state.departmentId).toBe('finance');expect(state.automationCompleted).toBe(true);expect(state.assignedUserId).toBeNull();
+    expect(evo.sendText).toHaveBeenLastCalledWith(channel,{to:'5511999999999',text:'Aguarde o Financeiro.'});
+    await service.recordInboundMessage(channel,'5511999999999','1','third',{});
+    expect(evo.sendText).toHaveBeenCalledTimes(2);
+    expect(db.user.findFirst).not.toHaveBeenCalled();
+  });
+  it('does not consume a pending answer while suspended or interrupt a human',async()=>{
+    const {db,evo,service}=setup(true, {enabled:false}, 'SUSPENDED');
+    let state:any={id:'conv',pendingAutomation:{message:'Done',departmentId:'finance'},assignedUserId:null};
+    db.conversation.findFirst.mockImplementation(async()=>state);
+    db.conversation.update.mockImplementation(async({data}:any)=>(state={...state,...data}));
+    await service.recordInboundMessage(channel,'5511999999999','My question','first',{});
+    expect(state.pendingAutomation.message).toBe('Done');expect(evo.sendText).not.toHaveBeenCalled();
+    state.assignedUserId='human';await service.recordInboundMessage(channel,'5511999999999','1','second',{});
+    expect(state.automationCompleted).toBe(true);expect(evo.sendText).not.toHaveBeenCalled();
+  });
   it('captures the profile name and routes only to an available operator',async()=>{
     const {db,evo,service}=setup(true);
     await service.recordInboundMessage(channel,'5511999999999',' SALES ','external',{},'Maria');
