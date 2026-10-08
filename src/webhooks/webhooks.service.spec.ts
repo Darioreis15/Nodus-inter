@@ -49,6 +49,17 @@ describe('WebhooksService', () => {
       expect(conversations.recordInboundMessage).not.toHaveBeenCalled();
     });
 
+    it.each([false, true, undefined])('aplica preferencia de grupos %s antes de persistir ou automatizar', async receiveGroupMessages => {
+      prisma.channel.findUnique.mockResolvedValue({ id: 'channel-1', config: { receiveGroupMessages } });
+      const payload = { event: 'messages.upsert', data: { key: { remoteJid: '1203630000@g.us' }, message: { conversation: 'grupo' } } };
+      await expect(service.handleEvolutionEvent('channel-1', payload)).resolves.toEqual({ ok: true });
+      expect(conversations.recordInboundMessage).toHaveBeenCalledTimes(receiveGroupMessages === false ? 0 : 1);
+      conversations.recordInboundMessage.mockClear();
+      payload.data.key.remoteJid = '5531999999999@s.whatsapp.net';
+      await service.handleEvolutionEvent('channel-1', payload);
+      expect(conversations.recordInboundMessage).toHaveBeenCalledTimes(1);
+    });
+
     it('delega mensagem recebida em messages.upsert pro ConversationsService', async () => {
       const channel = { id: 'channel-1', status: 'CONNECTED', externalId: 'nodus-abc' };
       prisma.channel.findUnique.mockResolvedValue(channel);
