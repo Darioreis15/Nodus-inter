@@ -1,3 +1,4 @@
+import { createContactPhotos } from './contact-photos.js?v=14';
 const API_URL = (window.NODUS_API_URL || '').trim().replace(/\/$/, '');
 // Session credentials stay in memory. Reloading the tab requires signing in again.
 try { localStorage.removeItem('nodus_token'); } catch { /* Browser storage may be disabled. */ }
@@ -12,6 +13,20 @@ const money = value => Number(value || 0).toLocaleString('pt-BR', { style:'curre
 const labels = { OPEN:'Caixa de entrada', PENDING:'Aguardando', RESOLVED:'Resolvidos', CONNECTED:'Conectado', DISCONNECTED:'Desconectado', SENT:'Enviada ao provedor', DELIVERED:'Entregue', READ:'Lida', FAILED:'Falhou', RECEIVED:'Recebida', QUEUED:'Na fila' };
 const notice = text => { $$('.toast').forEach(el => el.remove()); const node = document.createElement('div'); node.className = 'toast'; node.setAttribute('role','status'); node.textContent = text; document.body.append(node); setTimeout(() => node.remove(), 6000); };
 const body = data => JSON.stringify(data);
+const contactPhotos = createContactPhotos(async (id, signal) => {
+  const token = session.token;
+  if (!token) return null;
+  const response = await fetch(`${API_URL}/conversations/${encoded(id)}/photo`, {
+    signal, cache:'no-store', headers: { Authorization:`Bearer ${token}` },
+  });
+  if (!response.ok || session.token !== token) return null;
+  return (await response.json()).url;
+});
+function contactAvatar(c) {
+  const initials = (c.contact.name || c.contact.waId || '?').trim().split(/\s+/).slice(0,2).map(part => part[0]).join('').toUpperCase();
+  return `<div class="avatar contact-avatar"${c.channel.type === 'QR_EVOLUTION' ? ` data-contact-photo="${escape(c.id)}"` : ''}>${escape(initials)}</div>`;
+}
+
 function logo() { return '<div class="brand"><img src="./logo-nodus-mark.svg" alt=""/><span>Nodus</span></div>'; }
 async function api(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, { ...options, signal: AbortSignal.timeout(25000), headers: { 'Content-Type':'application/json', ...(session.token ? { Authorization:`Bearer ${session.token}` } : {}), ...options.headers } });
@@ -87,7 +102,8 @@ function emptyChat() { $('#chat').className = 'chat empty'; $('#chat').innerHTML
 function drawList(query = $('#search')?.value || '') {
   const list = $('#conversation-list'); if (!list) return;
   const matches = session.conversations.filter(c => `${c.contact.name || ''} ${c.contact.waId} ${c.lastMessage?.body || ''}`.toLowerCase().includes(query.toLowerCase()));
-  list.innerHTML = matches.length ? matches.map(c => `<button class="conversation ${session.active?.id === c.id ? 'active' : ''}" data-id="${escape(c.id)}"><div class="avatar">${escape((c.contact.name || c.contact.waId)[0])}</div><div class="conversation-info"><div><strong>${escape(c.contact.name || c.contact.waId)}</strong><time>${escape(c.lastMessage ? new Date(c.lastMessage.createdAt).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }) : '')}</time></div><p>${escape(c.lastMessage?.body || 'Sem mensagens')}</p><small>${escape(c.channel.name)}${c.departmentId ? ` · ${escape((session.departments || []).find(d => d.id === c.departmentId)?.name || 'Setor')}` : ''}</small></div></button>`).join('') : '<p class="no-results">Nenhum atendimento encontrado.</p>';
+  list.innerHTML = matches.length ? matches.map(c => `<button class="conversation ${session.active?.id === c.id ? 'active' : ''}" data-id="${escape(c.id)}">${contactAvatar(c)}<div class="conversation-info"><div><strong>${escape(c.contact.name || c.contact.waId)}</strong><time>${escape(c.lastMessage ? new Date(c.lastMessage.createdAt).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }) : '')}</time></div><p>${escape(c.lastMessage?.body || 'Sem mensagens')}</p><small>${escape(c.channel.name)}${c.departmentId ? ` · ${escape((session.departments || []).find(d => d.id === c.departmentId)?.name || 'Setor')}` : ''}</small></div></button>`).join('') : '<p class="no-results">Nenhum atendimento encontrado.</p>';
+  contactPhotos.observe(list);
   $$('.conversation', list).forEach(btn => btn.onclick = () => openConversation(btn.dataset.id));
 }
 async function loadConversations(status = 'OPEN', more = false) {
@@ -109,11 +125,12 @@ async function openConversation(id) {
   const c = session.conversations.find(c => c.id === id); if (!c) return;
   session.page = null; session.active = c; const generation = ++session.generation;
   drawList(); const chat = $('#chat'); chat.className = 'chat mobile-open';
-  chat.innerHTML = `<header class="chat-header"><button class="icon-btn mobile-back" aria-label="Voltar às conversas">←</button><div class="avatar">${escape((c.contact.name || c.contact.waId)[0])}</div><div><h2>${escape(c.contact.name || c.contact.waId)}</h2><p>${escape(c.contact.waId)} · ${escape(c.channel.name)}</p></div><div class="chat-actions"><button class="outline" id="rename-contact">Nome</button><button class="outline" id="transfer-department">Setor</button><button class="outline" id="assign">Assumir</button><button class="resolve" id="resolve">Resolver ✓</button>${c.channel.type === 'QR_EVOLUTION' ? '<button class="danger outline" id="delete-conversation">Excluir</button>' : '<button class="outline" id="send-template">Template</button>'}</div></header><button class="text-button" id="older-messages" hidden>Carregar mensagens anteriores</button><div id="messages" class="messages"><p class="loading">Carregando…</p></div><form id="message-form" class="composer"><textarea name="text" rows="2" maxlength="4000" placeholder="Escreva uma mensagem" aria-label="Mensagem" required></textarea><button class="send" type="submit" aria-label="Enviar mensagem">➜</button></form>`;
+  chat.innerHTML = `<header class="chat-header"><button class="icon-btn mobile-back" aria-label="Voltar às conversas">←</button>${contactAvatar(c)}<div><h2>${escape(c.contact.name || c.contact.waId)}</h2><p>${escape(c.contact.waId)} · ${escape(c.channel.name)}</p></div><div class="chat-actions"><button class="outline" id="rename-contact">Nome</button><button class="outline" id="transfer-department">Setor</button><button class="outline" id="assign">Assumir</button><button class="resolve" id="resolve">Resolver ✓</button>${c.channel.type === 'QR_EVOLUTION' ? '<button class="danger outline" id="delete-conversation">Excluir</button>' : '<button class="outline" id="send-template">Template</button>'}</div></header><button class="text-button" id="older-messages" hidden>Carregar mensagens anteriores</button><div id="messages" class="messages"><p class="loading">Carregando…</p></div><form id="message-form" class="composer"><textarea name="text" rows="2" maxlength="4000" placeholder="Escreva uma mensagem" aria-label="Mensagem" required></textarea><button class="send" type="submit" aria-label="Enviar mensagem">➜</button></form>`;
   $('.mobile-back').onclick = () => { chat.classList.remove('mobile-open'); };
   $('#transfer-department').onclick = async () => { const w = await api('/workspace'); modal('Encaminhar para setor', `<form id="transfer-form"><label>Setor<select name="departmentId">${departmentOptions(w.departments || [],c.departmentId)}</select></label><p>A transferência libera o atendente atual e mantém a conversa na fila.</p><button class="primary">Encaminhar</button></form>`); bindForm('#transfer-form', async data => { await api(`/conversations/${encoded(id)}/department`, { method:'PATCH', body:body({ departmentId:data.departmentId || null }) }); $('#modal').close(); await loadConversations(session.filter); }); };
   $('#assign').onclick = e => busy(e.currentTarget, async () => { await api(`/conversations/${encoded(id)}/assign`, { method:'PATCH', body:'{}' }); notice('Atendimento atribuído a você.'); });
   $('#resolve').onclick = e => busy(e.currentTarget, async () => { await api(`/conversations/${encoded(id)}/status`, { method:'PATCH', body:body({ status:'RESOLVED' }) }); await loadConversations(session.filter); notice('Atendimento finalizado.'); });
+  contactPhotos.observe(chat);
   $('#rename-contact').onclick = () => { modal('Nome do contato', `<form id="name-form"><label>Nome<input name="name" maxlength="120" value="${escape(c.contact.name || '')}" required></label><button type="submit" class="primary">Salvar</button></form>`); bindForm('#name-form', async data => { await api(`/conversations/${encoded(id)}/contact`, { method:'PATCH', body:body(data) }); c.contact.name = data.name; $('#modal').close(); openConversation(id); }); };
   if ($('#delete-conversation')) $('#delete-conversation').onclick = e => busy(e.currentTarget, async () => { if (!confirm('Excluir esta conversa e suas mensagens da plataforma? As cópias no celular e em outros sistemas permanecem.')) return; await api(`/conversations/${encoded(id)}`, { method:'DELETE' }); await loadConversations(session.filter); notice('Conversa excluída.'); });
   if ($('#send-template')) $('#send-template').onclick = () => sendTemplate(c);
@@ -484,6 +501,7 @@ async function reportsPage() {
   $('#page-content').innerHTML = `<div class="metrics">${['OPEN','PENDING','RESOLVED'].map(k => `<article><small>${labels[k]}</small><strong>${escape(counts[k] || 0)}</strong></article>`).join('')}<article><small>Primeira resposta média</small><strong>${escape(r.averageFirstResponseMinutes == null ? '—' : `${r.averageFirstResponseMinutes} min`)}</strong></article></div><section class="card"><h2>Chamados finalizados por usuário</h2><p class="muted">Total de conversas atualmente finalizadas, por quem concluiu o atendimento. Não se limita aos últimos 7 dias. Conversas reabertas deixam esta contagem até serem finalizadas novamente.</p>${Array.isArray(r.resolvedByUser) ? (r.resolvedByUser.length ? r.resolvedByUser.map(u => `<div class="data-row"><strong>${escape(u.name)}</strong><span>${escape(u.count)} chamado(s) finalizado(s)</span></div>`).join('') : '<p class="muted">Nenhum chamado finalizado.</p>') : '<p class="muted">Atualize o backend para carregar os chamados por usuário.</p>'}</section><section class="card"><h2>Mensagens nos últimos 7 dias</h2>${(r.messagesLast7Days || []).map(x => `<div class="data-row"><strong>${escape(x.date)}</strong><span>${escape(x.count)} mensagens</span></div>`).join('')}</section>`;
 }
 function logout(revoke = false) {
+  contactPhotos.clear();
   if (revoke && session.token) api('/auth/logout-all', { method:'POST', body:'{}' }).catch(() => notice('Você saiu deste navegador, mas não foi possível revogar as outras sessões.'));
   session.token = null; session.user = null; session.tenant = null; session.active = null; session.conversations = []; session.messages = []; $('#modal')?.close(); renderLogin();
 }
