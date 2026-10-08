@@ -19,7 +19,9 @@ describe('Meta token rotation HTTP', () => {
   let fetchMock: jest.SpyInstance;
   const previous = { ...process.env };
   const update = jest.fn();
-  const prisma = {
+  const prisma: any = {
+    $queryRaw: jest.fn(),
+    $transaction: jest.fn((fn: any) => fn(prisma)),
     user: { findFirst: jest.fn(async () => ({ role, tokenVersion: 0, mustChangePassword: false })) },
     tenant: { findUnique: jest.fn().mockResolvedValue({ status: 'ACTIVE' }) },
     rateBucket: { upsert: jest.fn().mockResolvedValue({ hits: 1 }) },
