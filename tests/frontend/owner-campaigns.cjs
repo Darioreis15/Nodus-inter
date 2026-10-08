@@ -43,6 +43,8 @@ const server = http.createServer((req,res) => {
       else if(p==='/auth/forgot-password')payload={message:'Se existir uma conta, enviaremos as instruções.'};
       else if(p==='/channels'&&method==='POST'){createCalls++;const c={...data,id:'new-channel',status:'PENDING'};channels.push(c);payload=c;}
       else if(p==='/channels')payload=channels;
+      else if(p.endsWith('/groups')){Object.assign(channels.find(c=>p.includes(c.id)),data);payload=data;}
+      else if(p.endsWith('/auto-reply')){Object.assign(channels.find(c=>p.includes(c.id)),data);payload=data;}
       else if(p.endsWith('/qrcode'))payload={base64:'" onerror="alert(1)',status:'unknown'};
       else if(p==='/conversations'&&method==='POST')payload={id:'conversation',status:'OPEN'};
       else if(p==='/conversations')payload= url.searchParams.get('status')==='RESOLVED' ? [{...conv[0],status:'RESOLVED',resolvedByName:'Ana Oliveira',resolvedAt:new Date().toISOString()}] : conv;
@@ -64,6 +66,7 @@ const server = http.createServer((req,res) => {
     const page=await context.newPage(), errors=[];page.on('pageerror',err=>{errors.push(err.message);console.log('PAGEERROR',err.message)}); page.on('console',m=>{if(m.type()==='error')console.log('CONSOLE',m.text())});
     async function login(){await page.locator('[name=email]').fill('ANA@EXAMPLE.COM');await page.locator('[name=password]').fill('test-password-123');await page.locator('#login-form button').click();}
     await page.goto(base);await login();await page.locator('.conversation').first().waitFor();
+    await page.locator('#new-conversation').click();assert.equal(await page.locator('#new-chat [name=phone]').getAttribute('placeholder'),'(31) 99999-9999');await page.locator('#new-chat [name=phone]').fill('(31) 99999-9999');await page.locator('#new-chat button').click();await page.locator('#modal').waitFor({state:'hidden'});assert.ok(requests.some(r=>r.p==='/conversations'&&r.method==='POST'&&r.data.phone==='(31) 99999-9999'));
     await page.locator('[data-page=users]').click();await page.getByText('Administrador principal · protegido',{exact:false}).waitFor();
     assert.equal(await page.locator('[data-role-user="admin"]').count(),0);assert.equal(await page.locator('[data-delete-user="admin"]').count(),0);
     await page.locator('[data-role-user="secondary"]').click();await page.locator('#role-form [name=role]').selectOption('AGENT');await page.locator('#role-form button').click();await page.locator('#modal').waitFor({state:'hidden'});
@@ -89,9 +92,16 @@ const server = http.createServer((req,res) => {
     await page.locator('#automations-form button.primary').click();await page.getByText('Automações salvas.',{exact:true}).waitFor();
     assert.equal(await page.locator('.automation-item[open]').count(),0);assert.equal(await page.locator('.automation-item').count(),3);assert.equal(settings.stages[2].fromStageId,settings.stages[1].id);assert.equal(settings.stages[2].waitForReply,true);assert.equal(settings.stages[2].completionMessage,'Aguarde o financeiro.');await page.screenshot({path:path.join(screenshotDir,'automations-list-v11.png')});
     assert.equal(settings.stages[1].fromStageId,settings.stages[0].id);assert.equal(settings.stages[1].departmentId,dept);assert.equal(settings.stages[1].userId,'admin');
-    await page.getByRole('tab',{name:'Boas-vindas',exact:true}).click();await page.locator('[data-auto-channel]').click();await page.locator('#auto-form [name=departmentId]').selectOption(dept);await page.locator('#auto-form button').click();await page.locator('#modal').waitFor({state:'hidden'});
-    assert.ok(requests.some(r=>r.p.endsWith('/auto-reply')&&r.data.departmentId===dept));
+    await page.getByRole('tab',{name:'Boas-vindas',exact:true}).click();await page.locator('[data-auto-channel]').click();assert.equal(await page.locator('#auto-form [name=onlyCustomerInitiated]').isChecked(),true);await page.screenshot({path:path.join(screenshotDir,'welcome-v13.png')});await page.locator('#auto-form [name=departmentId]').selectOption(dept);await page.locator('#auto-form button').click();await page.locator('#modal').waitFor({state:'hidden'});
+    assert.ok(requests.some(r=>r.p.endsWith('/auto-reply')&&r.data.departmentId===dept&&r.data.onlyCustomerInitiated===true));
     await page.locator('#chat').evaluate(el=>el.scrollTop=0);await page.screenshot({path:path.join(screenshotDir,'automations-v9.png')});
+    await page.locator('[data-page=connections]').click();await page.locator('[data-action=groups]').click();
+    assert.equal(await page.locator('[name=receiveGroupMessages]').isChecked(),true);
+    await page.locator('[name=receiveGroupMessages]').uncheck();await page.locator('#group-form button').click();await page.locator('#modal').waitFor({state:'hidden'});
+    await page.getByRole('button',{name:'Grupos: não receber',exact:true}).waitFor();assert.equal(channels[0].receiveGroupMessages,false);
+    await page.screenshot({path:path.join(screenshotDir,'groups-v13.png')});
+    await page.locator('[data-action=groups]').click();assert.equal(await page.locator('[name=receiveGroupMessages]').isChecked(),false);
+    await page.locator('[name=receiveGroupMessages]').check();await page.locator('#group-form button').click();await page.locator('#modal').waitFor({state:'hidden'});
     await page.locator('[data-page=campaigns]').click();await page.getByRole('tab',{name:'Nova campanha',exact:true}).click();await page.locator('#campaign-form').waitFor();
     await page.locator('#campaign-form [name=name]').fill('Boletos de teste');await page.locator('#campaign-form [name=recipients]').fill('5511999999999;Ana;https://example.com/boleto/123;99,00');
     await page.locator('[data-step=text]').fill('Olá {{nome}}, boleto {{link}}, valor {{valor}}. Responda SAIR.');await page.locator('#add-campaign-step').click();await page.locator('.campaign-step').nth(1).locator('[data-step=text]').fill('Lembrete {{nome}}');await page.locator('[name=consentConfirmed]').check();
