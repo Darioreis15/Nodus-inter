@@ -117,6 +117,19 @@ export class EvolutionConnector implements ChannelConnector {
     await this.instanceRequest(`restart/${encodeURIComponent(instanceName)}`, 'POST');
   }
 
+  async profilePicture(instanceName: string, number: string): Promise<string | null> {
+    try {
+      const response = await fetch(`${this.baseUrl}/chat/fetchProfilePictureUrl/${encodeURIComponent(instanceName)}`, {
+        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000),
+        headers: { 'Content-Type': 'application/json', apikey: this.globalApiKey },
+        body: JSON.stringify({ number }),
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      return typeof data?.profilePictureUrl === 'string' ? data.profilePictureUrl : null;
+    } catch { return null; } // Missing/private photos and provider outages never block a conversation.
+  }
+
   async sendText(channel: Channel, message: OutboundTextMessage): Promise<SendResult> {
     const config = channel.config as unknown as EvolutionConfig;
     const response = await fetch(`${this.baseUrl}/message/sendText/${config.instanceName}`, {
