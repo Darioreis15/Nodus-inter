@@ -1,6 +1,7 @@
+import { ContactPhotosService } from './contact-photos.service';
 import { ConversationDepartmentDto } from './dto/department.dto';
 import { StartConversationDto, ContactNameDto, StageDto, TemplateMessageDto } from './dto/start-conversation.dto';
-import { Delete, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Delete, Body, Controller, Get, Header, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ConversationsService } from './conversations.service';
@@ -11,7 +12,7 @@ import { SendConversationMessageDto } from './dto/send-message.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('conversations')
 export class ConversationsController {
-  constructor(private conversationsService: ConversationsService) {}
+  constructor(private conversationsService: ConversationsService, private photos: ContactPhotosService) {}
 
   @Post()
   start(@CurrentUser() user: AuthenticatedUser, @Body() dto: StartConversationDto) {
@@ -51,6 +52,12 @@ export class ConversationsController {
       status, cursor, departmentId,
       assignedUserId: mine === 'true' ? user.userId : undefined,
     });
+  }
+
+  @Get(':id/photo')
+  @Header('Cache-Control', 'no-store')
+  photo(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.photos.forConversation(user.tenantId, id);
   }
 
   @Get(':id/messages')
