@@ -8,13 +8,14 @@ import { ApiKeyGuard } from '../public-api/guards/api-key.guard';
 import { CurrentApiTenant } from '../public-api/decorators/current-api-tenant.decorator';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { ConversationsModule } from '../conversations/conversations.module';
-import { CampaignDto, CampaignStateDto } from './campaigns.dto';
+import { CampaignDto, CampaignStateDto, CampaignContactsQueryDto } from './campaigns.dto';
 import { CampaignsService } from './campaigns.service';
 @Controller('campaigns') @UseGuards(JwtAuthGuard, RolesGuard) @Roles('ADMIN')
 export class CampaignsController {
   constructor(private service: CampaignsService) {}
   @Get() list(@CurrentUser() user: AuthenticatedUser) { return this.service.list(user.tenantId); }
   @Post() create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CampaignDto) { return this.service.create(user.tenantId,dto); }
+  @Get('contacts') contacts(@CurrentUser() user: AuthenticatedUser, @Query() query: CampaignContactsQueryDto) { return this.service.contacts(user.tenantId, query); }
   @Get(':id') detail(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Query('cursor') cursor?: string) { return this.service.detail(user.tenantId,id,cursor); }
   @Patch(':id') state(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: CampaignStateDto) { return this.service.state(user.tenantId,id,dto.state); }
 }

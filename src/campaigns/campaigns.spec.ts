@@ -12,7 +12,7 @@ describe('Campaign queue boundaries',()=>{
  it('personalizes each payload, persists schedule and never sends during creation',async()=>{
   const {service,db,conversations}=setup();await service.create('tenant',dto);
   const rows=db.campaignDelivery.createMany.mock.calls[0][0].data;
-  expect(rows[0].payload.text).toBe('Oi Ana: https://example.com/invoice/123');
+  expect(rows[0].payload.text).toBe('Oi Ana: https://example.com/invoice/123\n\nPara não receber mais campanhas, responda SAIR.');
   expect(rows[1].dueAt.getTime()-rows[0].dueAt.getTime()).toBe(86400000);
   expect(conversations.sendMessage).not.toHaveBeenCalled();
  });
@@ -65,6 +65,13 @@ describe('Campaign queue boundaries',()=>{
   const {service,db,conversations}=setup();db.campaignDelivery.findFirst.mockResolvedValue(null);await service.deliver(job);expect(conversations.start).not.toHaveBeenCalled();
   db.campaignDelivery.findFirst.mockResolvedValue(job);await service.deliver(job);
   expect(db.campaignDelivery.update).toHaveBeenCalledWith({where:{id:'job'},data:expect.objectContaining({status:'SENT',messageId:'message',payload:{}})});
+ });
+ it('respects an opt-out received after claim, immediately before provider dispatch',async()=>{
+  const {service,db,conversations}=setup();db.campaignDelivery.findFirst.mockResolvedValue(job);
+  db.campaignSuppression.findUnique.mockResolvedValue({phoneHash:'blocked'});
+  await service.deliver(job);
+  expect(conversations.sendMessage).not.toHaveBeenCalled();expect(conversations.sendTemplate).not.toHaveBeenCalled();
+  expect(db.campaignDelivery.updateMany).toHaveBeenCalledWith(expect.objectContaining({where:{id:'job',status:'SENDING'},data:expect.objectContaining({status:'SKIPPED',payload:{}})}));
  });
  it('cancels only queued deliveries and rejects foreign campaign actions',async()=>{
   const {service,db}=setup();await service.state('tenant','campaign','CANCELLED');

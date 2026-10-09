@@ -25,3 +25,11 @@ export class CampaignDto {
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(10) @ValidateNested({ each: true }) @Type(() => CampaignStepDto) steps: CampaignStepDto[];
 }
 export class CampaignStateDto { @IsIn(['ACTIVE','PAUSED','CANCELLED']) state: 'ACTIVE' | 'PAUSED' | 'CANCELLED'; }
+
+export class CampaignContactsQueryDto {
+  @IsOptional() @IsString() @MaxLength(80) search?: string;
+  @IsOptional() @IsUUID() channelId?: string;
+  @IsOptional() @IsUUID() departmentId?: string;
+  @IsOptional() @IsUUID() stageId?: string;
+  @IsOptional() @IsUUID() cursor?: string;
+}

@@ -1,8 +1,9 @@
+import { Prisma } from '@prisma/client';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConversationsService } from '../conversations/conversations.service';
-import { CampaignDto, CampaignRecipientDto, CampaignStepDto } from './campaigns.dto';
+import { CampaignDto, CampaignRecipientDto, CampaignStepDto, CampaignContactsQueryDto } from './campaigns.dto';
 export const phoneHash = (tenantId: string, phone: string) => createHash('sha256').update(`${tenantId}:${phone}`).digest('hex');
 export function renderStep(step: CampaignStepDto, recipient: CampaignRecipientDto): CampaignStepDto {
   const values: Record<string,string> = { nome:recipient.name || '', link:recipient.link || '', valor:recipient.value || '' };
@@ -11,6 +12,7 @@ export function renderStep(step: CampaignStepDto, recipient: CampaignRecipientDt
     return values[key];
   });
   const result = step.type === 'TEXT' ? { ...step, text:render(step.text || '') } : { ...step, template:{ ...step.template!, parameters:step.template!.parameters.map(render) } };
+  if (result.type === 'TEXT' && !/\b(?:responda|digite|envie)\s+["“']?sair\b/i.test(result.text || '')) result.text += '\n\nPara não receber mais campanhas, responda SAIR.';
   if ((result.text?.length || 0) > 4000 || result.template?.parameters.some(p => p.length > 1024)) throw new BadRequestException('Mensagem personalizada excede o limite.');
   return result;
 }
@@ -27,6 +29,29 @@ export class CampaignsService implements OnModuleInit, OnModuleDestroy {
     }
   }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
+  async contacts(tenantId: string, query: CampaignContactsQueryDto) {
+    if (query.channelId && !await this.prisma.channel.findFirst({where:{id:query.channelId,tenantId},select:{id:true}})) throw new NotFoundException('Canal nao encontrado.');
+    const search = query.search?.trim() || '';
+    const digits = search.replace(/\D/g, '');
+    const where: Prisma.ContactWhereInput = {
+      tenantId, ...(query.cursor ? {id:{gt:query.cursor}} : {}),
+      conversations: {some:{channel:{tenantId},messages:{some:{}},
+        ...(query.channelId ? {channelId:query.channelId} : {}),
+        ...(query.departmentId ? {departmentId:query.departmentId} : {}),
+        ...(query.stageId ? {funnelStage:query.stageId} : {}),
+      }},
+      ...(search ? {OR:[{name:{contains:search,mode:'insensitive'}}, ...(digits ? [{waId:{contains:digits}}] : [])]} : {}),
+    };
+    // Page over stored contacts, not conversations: one number can have many conversations.
+    const rows = await this.prisma.contact.findMany({where,orderBy:{id:'asc'},take:51,select:{id:true,name:true,waId:true}});
+    const page = rows.slice(0,50);
+    const eligible = page.filter(c => /^[1-9]\d{7,14}$/.test(c.waId));
+    const suppressed = eligible.length ? await this.prisma.campaignSuppression.findMany({
+      where:{tenantId,phoneHash:{in:eligible.map(c=>phoneHash(tenantId,c.waId))}},select:{phoneHash:true},
+    }) : [];
+    const blocked = new Set(suppressed.map(s=>s.phoneHash));
+    return {contacts:eligible.filter(c=>!blocked.has(phoneHash(tenantId,c.waId))).map(c=>({id:c.id,name:c.name,phone:c.waId})),nextCursor:rows.length>50 ? page[49].id : null};
+  }
   async create(tenantId: string, dto: CampaignDto, sourceKeyHash?: string) {
     if (!dto.consentConfirmed) throw new BadRequestException('Confirme a autorizacao dos destinatarios.');
     const scheduledAt = new Date(dto.scheduledAt);
@@ -133,6 +158,11 @@ export class CampaignsService implements OnModuleInit, OnModuleDestroy {
     if (!active) { await this.prisma.campaignDelivery.updateMany({where:{id:job.id,status:'SENDING'},data:{status:'SKIPPED',payload:{},error:'Envio interrompido antes do despacho.',finishedAt:new Date()}}); return; }
     try {
       const conversation = await this.conversations.start(tenantId,{channelId:job.campaign.channelId,phone:job.contact.waId});
+      // Opt-out may arrive between claiming the job and preparing the conversation.
+      if (await this.prisma.campaignSuppression.findUnique({where:{tenantId_phoneHash:{tenantId,phoneHash:phoneHash(tenantId,job.contact.waId)}}})) {
+        await this.prisma.campaignDelivery.updateMany({where:{id:job.id,status:'SENDING'},data:{status:'SKIPPED',payload:{},error:'Destinatario optou por sair.',finishedAt:new Date()}});
+        return;
+      }
       const p = job.payload as CampaignStepDto;
       const message = p.type === 'TEMPLATE' ? await this.conversations.sendTemplate(tenantId,conversation.id,p.template!) : await this.conversations.sendMessage(tenantId,conversation.id,p.text!);
       await this.prisma.campaignDelivery.update({where:{id:job.id},data:{status:'SENT',messageId:message.id,payload:{},finishedAt:new Date()}});

@@ -38,6 +38,7 @@ const server = http.createServer((req,res) => {
       if(p==='/auth/login'){loginEmail=data.email;payload={accessToken:'test-token',mustChangePassword:forced};}
       else if(p==='/auth/me')payload={user,tenant:{status:tenantStatus}};
       else if(p==='/auth/change-email')payload={updated:true};
+      else if(p==='/campaigns/contacts')payload={contacts:url.searchParams.get('search')==='Bruno'?[{id:'bruno',name:'Bruno',phone:'5511888888888'}]:[{id:'ana',name:'Ana',phone:'5511999999999'}],nextCursor:null};
       else if(p==='/campaigns')payload=method==='POST'?{id:'campaign'}:{workerEnabled:false,campaigns:[]};
       else if(p==='/auth/change-password'){forced=false;payload={message:'ok'};}
       else if(p==='/auth/forgot-password')payload={message:'Se existir uma conta, enviaremos as instruções.'};
@@ -103,12 +104,17 @@ const server = http.createServer((req,res) => {
     await page.locator('[data-action=groups]').click();assert.equal(await page.locator('[name=receiveGroupMessages]').isChecked(),false);
     await page.locator('[name=receiveGroupMessages]').check();await page.locator('#group-form button').click();await page.locator('#modal').waitFor({state:'hidden'});
     await page.locator('[data-page=campaigns]').click();await page.getByRole('tab',{name:'Nova campanha',exact:true}).click();await page.locator('#campaign-form').waitFor();
+    await page.locator('[data-select-contact="5511999999999"]').check();
+    await page.locator('[data-contact-search]').fill('Bruno');await page.locator('[data-contact-find]').click();await page.locator('[data-select-contact="5511888888888"]').waitFor();
+    await page.locator('[data-select-contact="5511888888888"]').check();await page.locator('[data-select-contact="5511888888888"]').uncheck();
+    assert.equal(await page.locator('[data-contact-count]').innerText(),'1 de 100 contatos selecionados');
+    await page.screenshot({path:path.join(screenshotDir,'campaign-contacts-v15.png')});
     await page.locator('#campaign-form [name=name]').fill('Boletos de teste');await page.locator('#campaign-form [name=recipients]').fill('5511999999999;Ana;https://example.com/boleto/123;99,00');
     await page.locator('[data-step=text]').fill('Olá {{nome}}, boleto {{link}}, valor {{valor}}. Responda SAIR.');await page.locator('#add-campaign-step').click();await page.locator('.campaign-step').nth(1).locator('[data-step=text]').fill('Lembrete {{nome}}');await page.locator('[name=consentConfirmed]').check();
     await page.locator('#campaign-form button.primary').click();await page.locator('#confirm-campaign').waitFor();assert.ok(!requests.some(r=>r.p==='/campaigns'&&r.method==='POST'));
     await page.locator('#confirm-campaign').click();await page.locator('#modal').waitFor({state:'hidden'});
     const sent=requests.find(r=>r.p==='/campaigns'&&r.method==='POST').data;
-    assert.equal(sent.steps.length,2);assert.equal(sent.recipients[0].link,'https://example.com/boleto/123');assert.equal(sent.stopOnReply,true);
+    assert.equal(sent.recipients.length,1);assert.equal(sent.recipients[0].name,'Ana');assert.equal(sent.steps.length,2);assert.equal(sent.recipients[0].link,'https://example.com/boleto/123');assert.equal(sent.stopOnReply,true);
     await page.locator('#chat').evaluate(el=>el.scrollTop=0);await page.screenshot({path:path.join(screenshotDir,'campaigns-v9.png')});
     await page.setViewportSize({width:390,height:844});await page.screenshot({path:path.join(screenshotDir,'campaigns-mobile-v9.png')});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
     await page.setViewportSize({width:1440,height:960});await page.locator('[data-page=settings]').click();await page.locator('#email-form [name=email]').fill('new@example.com');await page.locator('#email-form [name=confirmation]').fill('new@example.com');await page.locator('#email-form [name=currentPassword]').fill('Current-password');await page.locator('#email-form button').click();await page.locator('#login-form').waitFor();
