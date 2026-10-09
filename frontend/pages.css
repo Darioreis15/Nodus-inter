@@ -108,3 +108,5 @@
 .away-options{display:grid;gap:16px;padding:20px}#automations-form>p{margin:0}#automations-form>h2{margin:0}
 
 .away-settings{border-top:1px solid var(--line);padding-top:16px}.away-settings summary{cursor:pointer;color:var(--rope)}.away-settings summary span{margin-left:10px}
+
+.contact-avatar{position:relative;overflow:hidden}.contact-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit}
