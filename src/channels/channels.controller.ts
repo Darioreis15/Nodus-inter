@@ -6,6 +6,7 @@ import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-use
 import { ChannelsService } from './channels.service';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateMetaTokenDto } from './dto/update-meta-token.dto';
+import { UpdateGroupPreferencesDto } from './dto/update-group-preferences.dto';
 import { UpdateAutoReplyDto } from './dto/update-auto-reply.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -48,7 +49,12 @@ export class ChannelsController {
     @Param('id') id: string,
     @Body() dto: UpdateAutoReplyDto,
   ) {
-    return this.channelsService.updateAutoReply(user.tenantId, id, dto.enabled, dto.message, dto.departmentId);
+    return this.channelsService.updateAutoReply(user.tenantId, id, dto.enabled, dto.message, dto.departmentId, dto.onlyCustomerInitiated);
+  }
+
+  @Roles('ADMIN') @Patch(':id/groups')
+  updateGroups(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateGroupPreferencesDto) {
+    return this.channelsService.updateGroups(user.tenantId, id, dto.receiveGroupMessages);
   }
 
   @Roles('ADMIN') @Post(':id/refresh')

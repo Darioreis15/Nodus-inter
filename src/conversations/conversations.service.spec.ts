@@ -43,6 +43,23 @@ describe('ConversationsService', () => {
       autoReplyMessage: null,
     };
 
+    it.each([
+      [true, undefined, false, true],
+      [false, undefined, false, false],
+      [false, true, false, false],
+      [false, false, false, true],
+      [false, false, true, false],
+    ])('boas-vindas: nova=%s somenteCliente=%s jaRecebeu=%s envia=%s', async (isNew, onlyCustomerInitiated, hasInbound, sends) => {
+      const conv = { id: 'conv-1', status: 'PENDING' };
+      prisma.conversation.findFirst.mockResolvedValue(isNew ? null : conv);
+      prisma.conversation.create.mockResolvedValue(conv);
+      prisma.conversation.update.mockResolvedValue(conv);
+      prisma.message.findFirst.mockResolvedValue(hasInbound ? { id: 'prior' } : null);
+      const send = jest.spyOn(service as any, 'sendAutoReply').mockResolvedValue(undefined);
+      await service.recordInboundMessage({ ...channel, autoReplyEnabled: true, autoReplyMessage: 'Bem-vindo!', config: { onlyCustomerInitiated } }, '5531999999999', 'Oi', undefined, {});
+      expect(send).toHaveBeenCalledTimes(sends ? 1 : 0);
+    });
+
     it('cria uma conversa nova quando nao existe nenhuma aberta com esse contato', async () => {
       contacts.findOrCreate.mockResolvedValue({ id: 'contact-1' });
       prisma.conversation.findFirst.mockResolvedValue(null);

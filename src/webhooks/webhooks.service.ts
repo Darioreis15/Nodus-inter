@@ -35,6 +35,8 @@ export class WebhooksService {
 
     if (event === 'messages.upsert') {
       const raw = payload?.data;
+      const isGroup = String(raw?.key?.remoteJid ?? '').endsWith('@g.us');
+      if (isGroup && (channel.config as any)?.receiveGroupMessages === false) return { ok: true };
       const fromMe = raw?.key?.fromMe;
       if (fromMe) {
         return { ok: true }; // eco da propria mensagem que a gente mandou, ignora

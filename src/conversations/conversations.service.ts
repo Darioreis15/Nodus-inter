@@ -46,6 +46,7 @@ export class ConversationsService {
       autoReplyEnabled: boolean;
       autoReplyMessage: string | null;
       autoReplyDepartmentId?: string | null;
+      config?: unknown;
     },
     fromNumber: string,
     text: string,
@@ -74,6 +75,11 @@ export class ConversationsService {
       const isNewConversation = !conversation;
       if (!conversation) conversation = await tx.conversation.create({ data: { channelId: channel.id, contactId: contact.id, status: 'OPEN' } });
       else conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { status: 'OPEN', updatedAt: new Date() } });
+      // Opt-in mode: greet on the first incoming reply even if staff opened the conversation.
+      // The default only greets new conversations created by an incoming customer message.
+      const welcomeOnFirstReply = (channel.config as any)?.onlyCustomerInitiated === false &&
+        !isNewConversation && channel.autoReplyEnabled &&
+        !await tx.message.findFirst({ where: { conversationId: conversation.id, direction: 'INBOUND' }, select: { id: true } });
       const message = await tx.message.create({ data: {
         conversationId: conversation.id, direction: 'INBOUND', externalId,
         fromNumber, toNumber: channel.externalId ?? 'desconhecido', body: text, status: 'RECEIVED',
@@ -119,7 +125,7 @@ export class ConversationsService {
             departmentId: null,
           } });
         } else departmentId = stage.departmentId ?? null;
-      } else if (isNewConversation && channel.autoReplyEnabled) {
+      } else if ((isNewConversation || welcomeOnFirstReply) && channel.autoReplyEnabled) {
         reply = channel.autoReplyMessage;
         if (reply) departmentId = channel.autoReplyDepartmentId;
       }

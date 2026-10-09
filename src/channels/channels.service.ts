@@ -25,6 +25,8 @@ export class ChannelsService {
       type: c.type,
       status: c.status,
       phoneNumber: (c.config as any)?.phoneNumber || null,
+      receiveGroupMessages: (c.config as any)?.receiveGroupMessages !== false,
+      onlyCustomerInitiated: (c.config as any)?.onlyCustomerInitiated !== false,
       autoReplyEnabled: c.autoReplyEnabled,
       autoReplyMessage: c.autoReplyMessage,
       autoReplyDepartmentId: c.autoReplyDepartmentId,
@@ -114,29 +116,52 @@ export class ChannelsService {
       throw new BadRequestException('Configuracao do numero Meta inconsistente.');
     }
     await validateMetaToken(channel.externalId, accessToken);
-    await this.prisma.channel.update({
-      where: { id: channelId, tenantId },
-      data: { config: { ...config, accessToken: seal(accessToken, `meta:${channel.externalId}`) } },
-      select: { id: true },
-    });
+    await this.patchConfig(tenantId, channelId, { accessToken: seal(accessToken, `meta:${channel.externalId}`) });
     return { id: channelId, tokenUpdated: true };
   }
 
-  async updateAutoReply(tenantId: string, channelId: string, enabled: boolean, message?: string, departmentId?: string | null) {
+  async updateAutoReply(tenantId: string, channelId: string, enabled: boolean, message?: string, departmentId?: string | null, onlyCustomerInitiated?: boolean) {
     await this.findOwnedChannel(tenantId, channelId);
     if (enabled && !message) {
       throw new ForbiddenException('Informe a mensagem de resposta automatica pra habilitar.');
     }
     return this.prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM channels WHERE id = ${channelId} FOR UPDATE`;
+      const current = await tx.channel.findFirstOrThrow({ where: { id: channelId, tenantId } });
       const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
       if (departmentId && !(tenant.workspaceSettings as any)?.departments?.some((d: { id: string }) => d.id === departmentId)) throw new BadRequestException('Setor inexistente nesta empresa.');
       return tx.channel.update({
         select: { id: true, name: true, autoReplyEnabled: true, autoReplyMessage: true, autoReplyDepartmentId: true },
         where: { id: channelId, tenantId },
         data: { autoReplyEnabled: enabled, autoReplyMessage: enabled ? message : null,
+          ...(onlyCustomerInitiated !== undefined ? { config: { ...(current.config as object), onlyCustomerInitiated } } : {}),
           ...(departmentId !== undefined ? { autoReplyDepartmentId: departmentId } : {}) },
       });
+    });
+  }
+
+  async updateGroups(tenantId: string, channelId: string, receiveGroupMessages: boolean) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM channels WHERE id = ${channelId} FOR UPDATE`;
+      const channel = await tx.channel.findFirst({ where: { id: channelId, tenantId } });
+      if (!channel) throw new NotFoundException('Canal nao encontrado.');
+      if (channel.type !== 'QR_EVOLUTION') throw new BadRequestException('Preferencia de grupos disponivel para conexoes QR Code.');
+      await tx.channel.update({ where: { id: channelId, tenantId }, data: { config: { ...(channel.config as object), receiveGroupMessages } }, select: { id: true } });
+      return { id: channelId, receiveGroupMessages };
+    });
+  }
+
+  // Provider calls can finish after an administrator saved preferences. Merge into
+  // the current row under a lock so refresh/token rotation cannot undo that choice.
+  private async patchConfig(tenantId: string, channelId: string, patch: Record<string, string | null>, status?: 'CONNECTED' | 'DISCONNECTED') {
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM channels WHERE id = ${channelId} FOR UPDATE`;
+      const current = await tx.channel.findFirst({ where: { id: channelId, tenantId } });
+      if (!current) throw new NotFoundException('Canal nao encontrado.');
+      return tx.channel.update({ where: { id: channelId, tenantId }, data: {
+        config: { ...(current.config as object), ...patch }, ...(status ? { status } : {}),
+      }, select: { id: true } });
     });
   }
 
@@ -149,7 +174,7 @@ export class ChannelsService {
       const number = await metaRequest(`${encodeURIComponent(config.phoneNumberId)}?fields=id,display_phone_number`, unseal(config.accessToken, `meta:${config.phoneNumberId}`));
       result = { status: 'CONNECTED', phoneNumber: typeof number.display_phone_number === 'string' ? number.display_phone_number : null };
     }
-    await this.prisma.channel.update({ where: { id: channelId }, data: { status: result.status, config: { ...config, phoneNumber: result.phoneNumber } } });
+    await this.patchConfig(tenantId, channelId, { phoneNumber: result.phoneNumber }, result.status);
     return { id: channelId, ...result };
   }
 
