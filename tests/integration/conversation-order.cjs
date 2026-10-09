@@ -1,0 +1,36 @@
+process.env.TZ="UTC";
+require("reflect-metadata");
+// Run after build with @electric-sql/pglite available through NODE_PATH.
+const {PGlite}=require('@electric-sql/pglite');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const {ConversationsService}=require('../../dist/conversations/conversations.service');
+(async()=>{
+ const db=new PGlite();
+ await db.exec(`CREATE TABLE channels(id text,tenant_id text);
+ CREATE TABLE conversations(id text,channel_id text,status text,department_id text,assigned_user_id text,"createdAt" timestamp,"updatedAt" timestamp);
+ CREATE TABLE messages(id text,conversation_id text,"createdAt" timestamp);
+ INSERT INTO channels VALUES ('ch','tenant'),('other','foreign');
+ INSERT INTO conversations SELECT lpad(i::text,3,'0'),'ch','OPEN','dep','agent','2026-10-01','2030-01-01' FROM generate_series(1,102) i;
+ INSERT INTO messages SELECT 'm'||i,lpad(i::text,3,'0'),'2026-10-09 09:00'::timestamp + i*interval '1 minute' FROM generate_series(1,102) i;
+ INSERT INTO conversations VALUES ('foreign','other','OPEN','dep','agent','2099-01-01','2099-01-01');`);
+ const prisma={ $queryRaw:async q=>(await db.query(q.text,q.values)).rows,conversation:{findMany:async q=>q.where.id.in.slice().reverse().map(id=>({id,contact:{},channel:{},messages:[]}))}};
+ const service=new ConversationsService(prisma,{}, {}, {}, {});
+ const first=await service.listForTenant('tenant',{});
+ assert.equal(first.length,100);assert.equal(first[0].id,'102');assert.equal(first[99].id,'003');
+ const second=await service.listForTenant('tenant',{cursor:first.at(-1).id});assert.deepEqual(second.map(c=>c.id),['002','001']);
+ assert.deepEqual(await service.listForTenant('tenant',{cursor:'foreign'}),[]);
+ assert.deepEqual(await service.listForTenant('tenant',{departmentId:'wrong'}),[]);
+ assert.deepEqual(await service.listForTenant('tenant',{status:'RESOLVED'}),[]);
+ assert.deepEqual(await service.listForTenant('tenant',{assignedUserId:'wrong'}),[]);
+ assert.deepEqual(await service.listForTenant("tenant' OR true --",{}),[]);
+ await db.exec(`UPDATE messages SET "createdAt"='2026-10-09 10:42' WHERE conversation_id='101';`);
+ assert.deepEqual((await service.listForTenant('tenant',{})).slice(0,2).map(c=>c.id),['102','101']);
+ await db.exec(`DELETE FROM messages WHERE conversation_id='102';`);
+ assert.equal((await service.listForTenant('tenant',{}))[0].id,'101');
+ const {sortConversations,conversationTime}=await import('data:text/javascript;base64,'+Buffer.from(fs.readFileSync('frontend/conversation-order.js')).toString('base64'));
+ const rows=[{id:'a',lastMessage:{createdAt:'2026-10-09T09:46:00Z'}},{id:'b',lastMessage:{createdAt:'2026-10-09T10:17:00Z'}},{id:'c',lastMessage:{createdAt:'2026-10-08T23:59:00Z'}}];
+ assert.deepEqual(sortConversations(rows).map(c=>c.id),['b','a','c']);assert.equal(rows[0].id,'a');
+ assert.match(conversationTime(rows[2],new Date('2026-10-09T12:00:00Z')), /08\/10\/26/);
+ await db.close();console.log('PASS chronological order, SQL pagination, ties, filters, tenant isolation, parameterization, deletion fallback and frontend sorting');
+})().catch(e=>{console.error(e);process.exit(1)});
