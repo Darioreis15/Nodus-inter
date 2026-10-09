@@ -1,3 +1,4 @@
+import { sortConversations, conversationTime } from './conversation-order.js?v=16';
 import { createCampaignContacts, mergeCampaignRecipients } from './campaign-contacts.js?v=15';
 import { createContactPhotos } from './contact-photos.js?v=14';
 const API_URL = (window.NODUS_API_URL || '').trim().replace(/\/$/, '');
@@ -102,8 +103,8 @@ function renderShell() {
 function emptyChat() { $('#chat').className = 'chat empty'; $('#chat').innerHTML = '<div><div class="empty-mark">∞</div><h2>Selecione uma conversa</h2><p>Escolha um atendimento ou inicie uma nova conversa.</p></div>'; }
 function drawList(query = $('#search')?.value || '') {
   const list = $('#conversation-list'); if (!list) return;
-  const matches = session.conversations.filter(c => `${c.contact.name || ''} ${c.contact.waId} ${c.lastMessage?.body || ''}`.toLowerCase().includes(query.toLowerCase()));
-  list.innerHTML = matches.length ? matches.map(c => `<button class="conversation ${session.active?.id === c.id ? 'active' : ''}" data-id="${escape(c.id)}">${contactAvatar(c)}<div class="conversation-info"><div><strong>${escape(c.contact.name || c.contact.waId)}</strong><time>${escape(c.lastMessage ? new Date(c.lastMessage.createdAt).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }) : '')}</time></div><p>${escape(c.lastMessage?.body || 'Sem mensagens')}</p><small>${escape(c.channel.name)}${c.departmentId ? ` · ${escape((session.departments || []).find(d => d.id === c.departmentId)?.name || 'Setor')}` : ''}</small></div></button>`).join('') : '<p class="no-results">Nenhum atendimento encontrado.</p>';
+  const matches = sortConversations(session.conversations).filter(c => `${c.contact.name || ''} ${c.contact.waId} ${c.lastMessage?.body || ''}`.toLowerCase().includes(query.toLowerCase()));
+  list.innerHTML = matches.length ? matches.map(c => `<button class="conversation ${session.active?.id === c.id ? 'active' : ''}" data-id="${escape(c.id)}">${contactAvatar(c)}<div class="conversation-info"><div><strong>${escape(c.contact.name || c.contact.waId)}</strong><time>${escape(conversationTime(c))}</time></div><p>${escape(c.lastMessage?.body || 'Sem mensagens')}</p><small>${escape(c.channel.name)}${c.departmentId ? ` · ${escape((session.departments || []).find(d => d.id === c.departmentId)?.name || 'Setor')}` : ''}</small></div></button>`).join('') : '<p class="no-results">Nenhum atendimento encontrado.</p>';
   contactPhotos.observe(list);
   $$('.conversation', list).forEach(btn => btn.onclick = () => openConversation(btn.dataset.id));
 }
@@ -164,7 +165,7 @@ async function newConversation() {
 }
 function sendTemplate(c) {
   modal('Template aprovado pela Meta', '<p>Use o nome exato e o idioma de um template aprovado. Esta tela aceita parâmetros de texto no corpo.</p><form id="template-form"><label>Nome do template<input name="name" required pattern="[a-z0-9_]+" placeholder="hello_world"></label><label>Idioma<input name="language" value="pt_BR" required></label><label>Parâmetros do corpo (um por linha, na ordem)<textarea name="parameters" rows="3"></textarea></label><button class="primary" type="submit">Enviar template</button></form>');
-  bindForm('#template-form', async data => { const result = await api(`/conversations/${encoded(c.id)}/template`, { method:'POST', body:body({ name:data.name, language:data.language, parameters:data.parameters ? data.parameters.split('\n') : [] }) }); $('#modal').close(); if (session.active?.id === c.id) { session.messages.push(result); drawMessages(); } notice('Template enviado ao provedor. Aguarde a confirmação de entrega.'); });
+  bindForm('#template-form', async data => { const result = await api(`/conversations/${encoded(c.id)}/template`, { method:'POST', body:body({ name:data.name, language:data.language, parameters:data.parameters ? data.parameters.split('\n') : [] }) }); $('#modal').close(); if (session.active?.id === c.id) { session.messages.push(result); c.lastMessage = result; drawList(); drawMessages(); } notice('Template enviado ao provedor. Aguarde a confirmação de entrega.'); });
 }
 function openPage(page) {
   session.page = page; session.active = null; session.generation++;
@@ -522,6 +523,7 @@ setInterval(async () => {
     if (generation !== session.generation || session.active?.id !== id) return;
     const el = $('#messages'), bottom = el && el.scrollHeight - el.scrollTop - el.clientHeight < 100;
     const byId = new Map(session.messages.map(m => [m.id,m])); rows.forEach(m => byId.set(m.id,m)); session.messages = [...byId.values()];
+    if (rows.length) { session.active.lastMessage = [...rows].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)||b.id.localeCompare(a.id))[0]; drawList(); }
     drawMessages(bottom);
   } catch (err) { if (err.status !== 401) notice(err.status === 429 ? 'Atualização pausada pelo limite de requisições. Aguarde.' : err.message); }
   finally { polling = false; }

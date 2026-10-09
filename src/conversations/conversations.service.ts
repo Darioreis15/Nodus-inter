@@ -186,10 +186,27 @@ export class ConversationsService {
   }
 
   async listForTenant(tenantId: string, filters: ListFilters) {
+    // Order before pagination; operational updates (assignment/status) must not
+    // move an old conversation ahead of a newer message. Values stay parameterized.
+    const page = await this.prisma.$queryRaw<{id:string}[]>(Prisma.sql`
+      WITH activity AS (
+        SELECT c.id, COALESCE((SELECT MAX(m."createdAt") FROM messages m
+          WHERE m.conversation_id = c.id), c."createdAt") AS at
+        FROM conversations c JOIN channels ch ON ch.id = c.channel_id
+        WHERE ch.tenant_id = ${tenantId}
+          ${filters.status ? Prisma.sql`AND c.status::text = ${filters.status}` : Prisma.empty}
+          ${filters.departmentId ? Prisma.sql`AND c.department_id = ${filters.departmentId}` : Prisma.empty}
+          ${filters.assignedUserId ? Prisma.sql`AND c.assigned_user_id = ${filters.assignedUserId}` : Prisma.empty}
+      )
+      SELECT id FROM activity
+      ${filters.cursor ? Prisma.sql`WHERE (at, id) < (SELECT at, id FROM activity WHERE id = ${filters.cursor})` : Prisma.empty}
+      ORDER BY at DESC, id DESC LIMIT 100
+    `);
+    if (!page.length) return [];
     const conversations = await this.prisma.conversation.findMany({
       where: {
         channel: { tenantId },
-
+        id: {in:page.map(row=>row.id)},
         ...(filters.departmentId ? { departmentId: filters.departmentId } : {}),
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.assignedUserId ? { assignedUserId: filters.assignedUserId } : {}),
@@ -197,14 +214,13 @@ export class ConversationsService {
       include: {
         contact: true,
         channel: { select: { id: true, name: true, type: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, direction: true, body: true, status: true, createdAt: true, fromNumber: true, toNumber: true } },
+        messages: { orderBy: [{ createdAt: 'desc' }, {id:'desc'}], take: 1, select: { id: true, direction: true, body: true, status: true, createdAt: true, fromNumber: true, toNumber: true } },
       },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      ...(filters.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {}),
-      take: 100,
+
     });
 
-    return conversations.map((c: (typeof conversations)[number]) => ({
+    const rank = new Map(page.map((row,index)=>[row.id,index]));
+    return conversations.sort((a,b)=>rank.get(a.id)!-rank.get(b.id)!).map((c: (typeof conversations)[number]) => ({
       id: c.id,
       status: c.status,
       assignedUserId: c.assignedUserId,
@@ -216,6 +232,7 @@ export class ConversationsService {
       channel: c.channel,
       lastMessage: c.messages[0] ?? null,
       updatedAt: c.updatedAt,
+      createdAt: c.createdAt,
     }));
   }
 
