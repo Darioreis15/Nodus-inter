@@ -14,11 +14,17 @@ export class ProxyDiagnosticsController {
     if (process.env.ENABLE_PROXY_DIAGNOSTICS !== 'true') throw new NotFoundException();
     // Forwarded headers are observations, NOT trusted evidence of client identity.
     const forwarded = req.get('x-forwarded-for');
+    const trueClientIp = req.get('true-client-ip');
+    const cfConnectingIp = req.get('cf-connecting-ip');
     return {
       effectiveIp: req.ip ?? null,
       socketIp: req.socket.remoteAddress ?? null,
       forwardedFor: forwarded?.slice(0, 1024) ?? null,
       forwardedForTruncated: (forwarded?.length ?? 0) > 1024,
+      trueClientIp: trueClientIp?.slice(0, 128) ?? null,
+      trueClientIpTruncated: (trueClientIp?.length ?? 0) > 128,
+      cfConnectingIp: cfConnectingIp?.slice(0, 128) ?? null,
+      cfConnectingIpTruncated: (cfConnectingIp?.length ?? 0) > 128,
       trustedChain: req.ips.slice(0, 20),
       trustedChainTruncated: req.ips.length > 20,
     };

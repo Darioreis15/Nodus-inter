@@ -130,6 +130,40 @@ A rota retorna 401 sem JWT valido e 403 para um AGENT autenticado. Para ADMIN
 autorizado, retorna 404 quando desativada e 200 quando habilitada. Os headers de
 seguranca e `Cache-Control: no-store` permanecem aplicados.
 
+### Teste dos headers do Render no Postman
+
+A resposta tambem inclui `trueClientIp` (True-Client-IP) e `cfConnectingIp`
+(CF-Connecting-IP), limitados a 128 caracteres com indicadores de truncamento.
+Sao observacoes da requisicao recebida, nao headers da resposta nem identidades
+ja confiaveis. Esta alteracao nao muda `req.ip`, trust proxy ou rate limiting.
+
+Com `ENABLE_PROXY_DIAGNOSTICS=true`, JWT ADMIN e Postman desktop, chamar
+`GET https://nodus-inter.onrender.com/auth/proxy-diagnostics`, sem body:
+
+1. Rede normal, sem headers de IP adicionados manualmente.
+2. Mesma rede, adicionando os tres headers abaixo.
+3. VPN ou outra rede, sem os headers manuais.
+4. VPN ou outra rede, repetindo os tres headers manuais.
+
+```text
+True-Client-IP: 203.0.113.123
+CF-Connecting-IP: 198.51.100.123
+X-Forwarded-For: 192.0.2.123
+```
+
+Comparar os JSONs: os dois headers candidatos devem refletir a conexao de saida
+real, mudar com a rede e nao adotar os valores ficticios. Header ausente,
+truncado, divergente ou contendo valor injetado exige investigacao. `effectiveIp`
+pode continuar como `::1` nesta etapa: observar os headers nao corrige o limitador.
+Nao usar X-Forwarded-For como identidade no Render, conforme orientacao do suporte.
+
+Registrar host e caminho testados. Repetir no dominio personalizado do backend,
+se houver. Estes testes verificam os caminhos exercitados, nao todos os caminhos
+possiveis nem a confiabilidade de chamadas internas. A rede privada e separada
+e os headers fornecidos por servicos internos nao ganham confianca automaticamente.
+Apos escolher e implementar a origem de IP, validar separadamente os contadores
+e o 429 por cliente. Desativar o diagnostico ao finalizar.
+
 ## Direitos e retencao
 
 - GET /privacy/contacts/:id?cursor=...: admin, exportacao paginada de contato e
