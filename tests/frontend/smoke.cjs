@@ -63,6 +63,54 @@ const server = http.createServer((req,res) => {
     async function login(){await page.locator('[name=email]').fill('ANA@EXAMPLE.COM');await page.locator('[name=password]').fill('test-password-123');await page.locator('#login-form button').click();}
     await page.goto(base);await page.screenshot({path:path.join(screenshotDir,'login.png')});await login();
     await page.locator('.conversation').first().waitFor({timeout:5000}).catch(async e=>{console.log('REQUESTS',requests);console.log('BODY',await page.locator('body').innerText());throw e});assert.equal(loginEmail,'ana@example.com');assert.equal(await page.evaluate(()=>localStorage.getItem('nodus_token')),null);
+    // Slow secondary requests must not expose the old, ungrouped forms.
+    async function holdNext(path, payload, status = 200) {
+      let begin, release, finish, used = false;
+      const started = new Promise(r => begin = r), held = new Promise(r => release = r), finished = new Promise(r => finish = r);
+      const pattern = `https://api.nodus.test${path}`;
+      const handler = async route => {
+        if (used) return route.fallback();
+        used = true; begin(); await held;
+        try { await route.fulfill({status,contentType:'application/json',body:JSON.stringify(payload)}); }
+        finally { finish(); }
+      };
+      await page.route(pattern, handler);
+      return {started, async release() { release(); await finished; await page.unroute(pattern, handler); await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))); }};
+    }
+    for (const [name, path, payload, form] of [
+      ['settings','/api-keys',[],'#email-form'],
+      ['connections','/channels',channels,'#channel-form'],
+      ['automations','/channels',channels,'#automations-form'],
+      ['users','/users',[{...user,availability:{available:true}}],'#user-form'],
+    ]) {
+      const gate = await holdNext(path, payload);
+      await page.locator(`[data-page=${name}]`).click(); await gate.started;
+      assert.equal(await page.locator('#page-content').getAttribute('aria-busy'),'true');
+      assert.equal(await page.locator(form).isVisible(),false,`${name} must not flash ungrouped forms`);
+      assert.equal(await page.getByRole('status').filter({hasText:'Carregando…'}).count(),1);
+      await gate.release(); await page.getByRole('tab').first().waitFor();
+      assert.equal(await page.locator('[role=tabpanel]:visible').count(),1);
+    }
+    // A response from a previous visit cannot overwrite a newer visit to the same page.
+    const oldSettings = await holdNext('/workspace',{...settings,timezone:'Pacific/Honolulu'});
+    await page.locator('[data-page=settings]').click(); await oldSettings.started;
+    await page.locator('[data-page=connections]').click(); await page.getByRole('tab',{name:'Meus canais',exact:true}).waitFor();
+    await page.locator('[data-page=settings]').click(); await page.getByRole('tab',{name:'Expediente',exact:true}).click();
+    await page.locator('#settings-form [name=timezone]').fill('Europe/Lisbon');
+    await oldSettings.release();
+    assert.equal(await page.locator('#settings-form [name=timezone]').inputValue(),'Europe/Lisbon');
+    await page.locator('[data-page=connections]').click(); await page.getByRole('tab',{name:'Novo canal',exact:true}).click();
+    await page.locator('[data-page=settings]').click(); await page.getByRole('tab',{name:'Expediente',exact:true}).waitFor();
+    assert.equal(await page.getByRole('tab',{name:'Expediente',exact:true}).getAttribute('aria-selected'),'true');
+    await page.locator('[data-page=connections]').click(); await page.getByRole('tab',{name:'Novo canal',exact:true}).waitFor();
+    assert.equal(await page.getByRole('tab',{name:'Novo canal',exact:true}).getAttribute('aria-selected'),'true');
+    // Loading errors offer a safe retry and never reveal partially assembled forms.
+    const failedSettings = await holdNext('/workspace',{message:'Falha simulada'},503);
+    await page.locator('[data-page=settings]').click(); await failedSettings.started; await failedSettings.release();
+    await page.getByRole('alert').filter({hasText:'Falha simulada'}).waitFor();
+    assert.equal(await page.locator('#email-form').count(),0);
+    await page.getByRole('button',{name:'Tentar novamente',exact:true}).click();
+    await page.getByRole('tab',{name:'Expediente',exact:true}).waitFor();
     // Appearance preference is browser-only, persists on reload and reacts to OS changes.
     assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
     await page.locator('[data-page=settings]').click();
@@ -123,6 +171,6 @@ const server = http.createServer((req,res) => {
     await page.getByRole('tab',{name:'Aparência',exact:true}).click();
     await page.locator('[name=appearance-theme][value=dark]').check();
     assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
-    assert.deepEqual(errors,[]);console.log('Frontend smoke passed: login, XSS, create twice without reload, QR sanitization, settings, temporary password, logs, billing, mobile, expired session, forced password change, suspended admin, agent navigation.');
+    assert.deepEqual(errors,[]);console.log('Frontend smoke passed: delayed navigation, stale responses, remembered tabs, retry, themes, login, XSS, create twice without reload, QR sanitization, settings, temporary password, logs, billing, mobile, expired session, forced password change, suspended admin, agent navigation.');
   } finally {await browser.close();server.close();}
 })().catch(err=>{console.error(err);server.close();process.exitCode=1;});

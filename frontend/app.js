@@ -4,7 +4,7 @@ import { createContactPhotos } from './contact-photos.js?v=14';
 const API_URL = (window.NODUS_API_URL || '').trim().replace(/\/$/, '');
 // Session credentials stay in memory. Reloading the tab requires signing in again.
 try { localStorage.removeItem('nodus_token'); } catch { /* Browser storage may be disabled. */ }
-const session = { token: null, user: null, tenant: null, conversations: [], active: null, messages: [], filter: 'OPEN', page: null, generation: 0 };
+const session = { token: null, user: null, tenant: null, conversations: [], active: null, messages: [], filter: 'OPEN', page: null, generation: 0, tabs: {} };
 const app = document.querySelector('#app');
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -168,12 +168,27 @@ function sendTemplate(c) {
   bindForm('#template-form', async data => { const result = await api(`/conversations/${encoded(c.id)}/template`, { method:'POST', body:body({ name:data.name, language:data.language, parameters:data.parameters ? data.parameters.split('\n') : [] }) }); $('#modal').close(); if (session.active?.id === c.id) { session.messages.push(result); c.lastMessage = result; drawList(); drawMessages(); } notice('Template enviado ao provedor. Aguarde a confirmação de entrega.'); });
 }
 function openPage(page) {
+  if (session.page === page && $('#page-content')) return;
   session.page = page; session.active = null; session.generation++;
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.page === page)); $('.inbox').style.display = 'none';
   const titles = { campaigns:['Campanhas e follow-ups','Envios agendados com acompanhamento por destinatário.'], connections:['Conexões','Gerencie os canais e números da sua empresa.'], settings:['Configurações','Sua conta, aparência, expediente e integrações.'], automations:['Automações','Mensagens automáticas e regras de atendimento.'], users:['Operadores','Acessos e disponibilidade da equipe.'], billing:['Mensalidades','Acompanhe as cobranças da sua empresa no Asaas.'], logs:['Logs de conversas','Identifique quem finalizou cada atendimento.'], funnel:['Funil de atendimento','Organize as conversas por etapa.'], reports:['Relatórios','Indicadores da sua operação.'] };
   const [title, sub] = titles[page]; const chat = $('#chat'); chat.className = 'page';
-  chat.innerHTML = `<header class="page-header"><p class="eyebrow">PAINEL NODUS</p><h1>${title}</h1><p>${sub}</p></header><div class="page-content" id="page-content"><p class="loading">Carregando…</p></div>`;
-  ({ campaigns:campaignsPage, connections:connectionsPage, settings:settingsPage, automations:automationsPage, users:usersPage, billing:billingPage, logs:logsPage, funnel:funnelPage, reports:reportsPage })[page]().then(() => { if (session.page === page) organizePageTabs(page); }).catch(err => { if (session.page === page) $('#page-content').textContent = err.message; });
+  chat.scrollTop = 0;
+  chat.innerHTML = `<header class="page-header"><p class="eyebrow">PAINEL NODUS</p><h1>${title}</h1><p>${sub}</p></header><p class="loading page-loading" role="status">Carregando…</p><div class="page-content" id="page-content" hidden aria-busy="true"></div>`;
+  const root = $('#page-content'), loading = $('.page-loading', chat);
+  const current = () => root.isConnected && root === $('#page-content') && session.page === page;
+  const reveal = () => { loading.remove(); root.hidden = false; root.setAttribute('aria-busy', 'false'); };
+  ({ campaigns:campaignsPage, connections:connectionsPage, settings:settingsPage, automations:automationsPage, users:usersPage, billing:billingPage, logs:logsPage, funnel:funnelPage, reports:reportsPage })[page]().then(() => {
+    if (!current()) return;
+    organizePageTabs(page); reveal();
+  }).catch(err => {
+    if (!current()) return;
+    root.replaceChildren();
+    const message = document.createElement('p'); message.className = 'form-error'; message.setAttribute('role', 'alert'); message.textContent = err.message;
+    const retry = document.createElement('button'); retry.className = 'outline'; retry.textContent = 'Tentar novamente';
+    retry.onclick = () => { session.page = null; openPage(page); };
+    root.append(message, retry); reveal();
+  });
 }
 // Move existing panels rather than rendering them again: forms and handlers survive tab changes.
 function organizePageTabs(page) {
@@ -206,6 +221,7 @@ function organizePageTabs(page) {
   tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', $('.page-header h1').textContent);
   const content = document.createElement('div'); content.className = 'tab-content';
   const select = (index, focus = false) => {
+    session.tabs[page] = panels[index][0];
     panels.forEach(([, panel], i) => {
       panel.hidden = i !== index;
       const button = tabs.children[i]; button.setAttribute('aria-selected', String(i === index)); button.tabIndex = i === index ? 0 : -1;
@@ -227,7 +243,7 @@ function organizePageTabs(page) {
   });
   // Keep report summary metrics above its detail tabs; remove only emptied layout wrappers.
   $$('.page-grid, #account-settings', root).forEach(el => { if (!el.querySelector('.card')) el.remove(); });
-  root.append(tabs, content); select(0);
+  root.append(tabs, content); select(Math.max(0, panels.findIndex(([label]) => label === session.tabs[page])));
   // Newly created items are shown immediately in their list, without reloading the page.
   root.addEventListener('nodus:show-list', () => select(0));
 }
@@ -239,7 +255,8 @@ async function connectionsPage() {
   await drawChannels();
 }
 async function drawChannels() {
-  const rows = await api('/channels'); if (session.page !== 'connections') return;
+  const root = $('#page-content');
+  const rows = await api('/channels'); if (root !== $('#page-content') || session.page !== 'connections') return;
   const el = $('#channel-list'); el.innerHTML = rows.map(c => `<article class="connection-card"><div class="section-title"><strong>${escape(c.name)}</strong><span class="status">${escape(c.status === 'PENDING' ? 'Aguardando conexão' : labels[c.status] || c.status)}</span></div><p>${escape(c.phoneNumber || 'Número ainda não consultado')} · ${c.type === 'QR_EVOLUTION' ? 'QR Code' : 'API oficial'}</p><div class="actions"><button class="outline" data-action="refresh" data-id="${escape(c.id)}">Consultar conexão</button>${c.type === 'QR_EVOLUTION' ? `<button class="outline" data-action="groups" data-id="${escape(c.id)}">Grupos: ${c.receiveGroupMessages === false ? 'não receber' : 'receber'}</button><button class="outline" data-action="qr" data-id="${escape(c.id)}">QR Code</button><button class="outline" data-action="restart" data-id="${escape(c.id)}">Reconectar</button><button class="outline" data-action="disconnect" data-id="${escape(c.id)}">Desconectar</button>` : `<button class="outline" data-action="token" data-id="${escape(c.id)}">Atualizar token</button>`}<button class="outline danger" data-action="delete" data-id="${escape(c.id)}">Excluir canal</button></div></article>`).join('') || '<p class="no-results">Nenhum canal cadastrado.</p>';
   $$('[data-action]', el).forEach(btn => btn.onclick = () => busy(btn, async () => {
     const c = rows.find(c => c.id === btn.dataset.id), action = btn.dataset.action;
@@ -278,7 +295,8 @@ async function usersPage() {
   await drawUsers();
 }
 async function drawUsers() {
-  const [users, limits] = await Promise.all([api('/users'), api('/users/limits')]); if (session.page !== 'users') return;
+  const root = $('#page-content');
+  const [users, limits] = await Promise.all([api('/users'), api('/users/limits')]); if (root !== $('#page-content') || session.page !== 'users') return;
   $('#user-limits').textContent = `${limits.used} de ${limits.maxUsers} acessos utilizados no plano ${limits.planName}. Administradores também contam. ${limits.available} vaga(s) disponível(is).`;
   $('#user-list').innerHTML = users.map(u => `<article class="data-row"><div><strong>${escape(u.name)}</strong><p>${escape(u.email)} · ${u.isOwner ? 'Administrador principal · protegido' : u.role === 'ADMIN' ? 'Administrador' : 'Operador'}</p><p>${u.availability?.available === false ? 'Indisponível' : 'Disponível conforme expediente'}</p></div><button class="outline" data-user="${escape(u.id)}">Disponibilidade</button>${!u.isOwner ? `<button class="outline" data-role-user="${escape(u.id)}">Alterar perfil</button><button class="text-button danger" data-delete-user="${escape(u.id)}">Excluir acesso</button>` : ''}</article>`).join('');
   $$('[data-role-user]').forEach(btn => btn.onclick = () => {
@@ -300,9 +318,10 @@ async function drawUsers() {
   });
 }
 async function settingsPage() {
+  const root = $('#page-content');
   const manage = session.user.role === 'ADMIN' && session.tenant.status !== 'SUSPENDED';
   if (!manage) { $('#page-content').innerHTML = '<div id="account-settings"></div>'; accountSettings(); return; }
-  const settings = await api('/workspace'); if (session.page !== 'settings') return;
+  const settings = await api('/workspace'); if (root !== $('#page-content') || session.page !== 'settings') return;
   $('#page-content').innerHTML = `<div id="account-settings"></div><div class="page-grid"><section class="card"><h2>Expediente da empresa</h2><form id="settings-form"><label>Fuso horário<input name="timezone" value="${escape(settings.timezone)}" required></label>${scheduleFields(settings.businessHours)}<p class="muted">Horários que passam da meia-noite são aceitos. Configure as mensagens fora do expediente na aba Automações.</p><button class="primary" type="submit">Salvar expediente</button></form></section><section class="card"><h2>Integração — API aberta</h2><p class="muted">Crie uma chave para integrar o seu sistema. A chave concede acesso aos dados da sua empresa e deve ficar no servidor da integração.</p><form id="key-form"><label>Nome da integração<input name="name" required maxlength="100" placeholder="Meu CRM"></label><button class="primary" type="submit">Gerar chave de API</button></form><div id="keys-list"></div><p class="muted">Base: ${escape(API_URL)}/public/v1<br>Autenticação: Authorization: Bearer SUA_CHAVE</p></section></div>`;
   accountSettings();
   bindForm('#settings-form', async data => {
@@ -343,7 +362,8 @@ function appearanceSettings() {
 }
 function departmentOptions(departments, selected) { return '<option value="">Sem setor</option>' + departments.map(d => `<option value="${escape(d.id)}" ${d.id === selected ? 'selected' : ''}>${escape(d.name)}</option>`).join(''); }
 async function automationsPage() {
-  const [settings, users] = await Promise.all([api('/workspace'), api('/users')]); if (session.page !== 'automations') return;
+  const root = $('#page-content');
+  const [settings, users] = await Promise.all([api('/workspace'), api('/users')]); if (root !== $('#page-content') || session.page !== 'automations') return;
   $('#page-content').innerHTML = `<div class="page-grid"><section class="card"><h2>Regras de conversa</h2><form id="automations-form"><label>Resposta fora do expediente<textarea name="awayMessage" maxlength="4000" rows="4">${escape(settings.awayMessage)}</textarea></label><p class="muted">Enviada ao iniciar uma conversa fora do horário definido em Configurações → Expediente.</p><label>Encaminhar resposta fora do expediente para<select name="awayDepartmentId" data-department-select>${departmentOptions(settings.departments || [], settings.awayDepartmentId)}</select></label><h2>Automações criadas</h2><p class="muted">Cada automação é uma etapa da conversa. Abra para editar ou use “Criar próxima etapa” para continuar o fluxo. As alterações entram em vigor ao clicar em Salvar automações.</p><p id="stage-count" class="muted" aria-live="polite"></p><p class="muted">Quando o cliente enviar a palavra-chave exata, a conversa muda de etapa e recebe a mensagem configurada. O operador só é atribuído se estiver disponível. Sem disponibilidade, a conversa permanece na fila.</p><div id="stage-fields"></div><button type="button" class="outline" id="add-stage">+ Nova automação</button><button class="primary" type="submit">Salvar automações</button></form></section><section class="card"><h2>Setores de atendimento</h2><p class="muted">Crie as filas e selecione o destino em cada resposta. Setores organizam a fila; os operadores da empresa continuam podendo atender todos os setores.</p><form id="department-form"><div id="department-fields"></div><button type="button" id="add-department" class="outline">+ Adicionar setor</button><button class="primary">Salvar setores</button></form><h2>Boas-vindas por canal</h2><p class="muted">Configure a resposta no início de uma conversa para cada WhatsApp conectado.</p><div id="automation-channels"></div></section></div>`;
   const rulesForm = $('#automations-form');
   const awayOptions = document.createElement('details'); awayOptions.className = 'away-settings';
@@ -424,12 +444,14 @@ async function automationsPage() {
   await drawAutomationChannels();
 }
 async function drawAutomationChannels() {
-  const channels = await api('/channels'); if (session.page !== 'automations') return;
+  const root = $('#page-content');
+  const channels = await api('/channels'); if (root !== $('#page-content') || session.page !== 'automations') return;
   $('#automation-channels').innerHTML = channels.map(c => `<article class="connection-card"><strong>${escape(c.name)}</strong><p>${escape(c.phoneNumber || 'Número ainda não consultado')} · ${c.autoReplyEnabled ? 'Resposta ativada' : 'Resposta desativada'}</p><p>${escape(c.autoReplyMessage || 'Nenhuma mensagem configurada.')}</p><button class="outline" data-auto-channel="${escape(c.id)}">Configurar boas-vindas</button></article>`).join('') || '<p class="muted">Cadastre um canal em Conexões para configurar as boas-vindas.</p>';
   $$('[data-auto-channel]').forEach(btn => btn.onclick = () => autoReply(channels.find(c => c.id === btn.dataset.autoChannel)));
 }
 async function campaignsPage() {
-  const [channels, settings] = await Promise.all([api('/channels'), api('/workspace')]); if (session.page !== 'campaigns') return;
+  const root = $('#page-content');
+  const [channels, settings] = await Promise.all([api('/channels'), api('/workspace')]); if (root !== $('#page-content') || session.page !== 'campaigns') return;
   $('#page-content').innerHTML = `<div class="page-grid"><section class="card"><h2>Nova campanha ou sequência</h2><form id="campaign-form"><label>Nome<input name="name" required maxlength="100" placeholder="Lembrete de mensalidade"></label><label>Canal<select name="channelId" required>${channels.map(c => `<option value="${escape(c.id)}">${escape(c.name)} — ${c.type === 'OFFICIAL_META' ? 'Meta (template aprovado)' : 'QR Code (texto)'}</option>`).join('')}</select></label><label>Data e hora de início<input name="scheduledAt" type="datetime-local" required></label><p class="muted">Horário do seu dispositivo: ${escape(Intl.DateTimeFormat().resolvedOptions().timeZone)}. Envios são graduais, não simultâneos. O servidor precisa estar ativo.</p><fieldset id="campaign-contact-picker"></fieldset><label>Inclusão manual (opcional) — um por linha<textarea name="recipients" rows="5" placeholder="5511999999999;Maria;https://seusite.com/boleto/123;99,00"></textarea></label><p class="muted">Formato: telefone com DDI;nome;link;valor. Até 100 destinatários no total. Para complementar um contato selecionado com link e valor, informe o mesmo telefone nesta área: ele será incluído uma única vez. Nome é necessário quando a mensagem usa {{nome}}.</p><div id="campaign-steps"></div><button type="button" id="add-campaign-step" class="outline">+ Follow-up</button><label class="checkbox"><input name="stopOnReply" type="checkbox" checked>Interromper a sequência quando o cliente responder</label><label class="checkbox"><input name="consentConfirmed" type="checkbox" required>Tenho autorização para enviar estas mensagens aos destinatários</label><p class="muted">Em mensagens de texto, a orientação para responder SAIR é incluída automaticamente quando estiver ausente. SAIR, PARAR, STOP ou CANCELAR bloqueiam novas campanhas da empresa para o contato. Na Meta, inclua essa orientação no template aprovado: o sistema não altera seu conteúdo.</p><button class="primary">Revisar agendamento</button></form></section><section class="card"><h2>Campanhas da empresa</h2><p id="worker-status" class="muted"></p><button class="outline" id="refresh-campaigns">Atualizar</button><div id="campaign-list"></div></section></div>`;
   const contactPicker = createCampaignContacts({ root:$('#campaign-contact-picker'), api, channels, settings, escape, notice });
   $('[name="scheduledAt"]').value = new Date(Date.now()+60000-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
@@ -458,7 +480,8 @@ async function campaignsPage() {
   $('#refresh-campaigns').onclick = () => drawCampaigns(); await drawCampaigns();
 }
 async function drawCampaigns() {
-  const result = await api('/campaigns'); if (session.page !== 'campaigns') return;
+  const root = $('#page-content');
+  const result = await api('/campaigns'); if (root !== $('#page-content') || session.page !== 'campaigns') return;
   $('#worker-status').textContent = result.workerEnabled ? 'Processamento habilitado. Em hospedagem que adormece, os envios aguardam o servidor voltar.' : 'Processamento desativado no servidor. Os agendamentos ficam salvos, mas não serão enviados até a ativação.';
   const states = {ACTIVE:'Ativa',PAUSED:'Pausada',CANCELLED:'Cancelada'};
   $('#campaign-list').innerHTML = result.campaigns.map(c => `<article class="connection-card"><strong>${escape(c.name)}</strong><p>${states[c.state] || escape(c.state)} · ${c._count.deliveries} envio(s) registrado(s)</p><button class="outline" data-campaign-detail="${escape(c.id)}">Ver envios</button>${c.state !== 'CANCELLED' ? `<button class="outline" data-campaign-state="${c.state === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'}" data-id="${escape(c.id)}">${c.state === 'ACTIVE' ? 'Pausar' : 'Retomar'}</button><button class="text-button danger" data-campaign-state="CANCELLED" data-id="${escape(c.id)}">Cancelar</button>` : ''}</article>`).join('') || '<p>Nenhuma campanha criada.</p>';
@@ -477,21 +500,24 @@ async function campaignDetail(id) {
   $('#more-deliveries').onclick = e => busy(e.currentTarget,load); await load();
 }
 async function drawKeys() {
-  const rows = await api('/api-keys'); if (session.page !== 'settings') return;
+  const root = $('#page-content');
+  const rows = await api('/api-keys'); if (root !== $('#page-content') || session.page !== 'settings') return;
   $('#keys-list').innerHTML = rows.map(k => `<article class="data-row"><div><strong>${escape(k.name)}</strong><p>${escape(k.keyPrefix)}… · ${k.revokedAt ? 'Revogada' : 'Ativa'}</p></div>${!k.revokedAt ? `<button class="outline danger" data-key="${escape(k.id)}">Revogar</button>` : ''}</article>`).join('');
   $$('[data-key]').forEach(btn => btn.onclick = () => busy(btn, async () => { if (!confirm('Revogar esta chave? A integração deixará de acessar a API.')) return; await api(`/api-keys/${encoded(btn.dataset.key)}`, { method:'DELETE' }); await drawKeys(); }));
 }
 async function funnelPage() {
-  const [settings, open, pending] = await Promise.all([api('/workspace'), api('/conversations?status=OPEN'), api('/conversations?status=PENDING')]); if (session.page !== 'funnel') return;
+  const root = $('#page-content');
+  const [settings, open, pending] = await Promise.all([api('/workspace'), api('/conversations?status=OPEN'), api('/conversations?status=PENDING')]); if (root !== $('#page-content') || session.page !== 'funnel') return;
   const rows = [...open, ...pending]; const stages = [{ id:'', name:'Sem etapa' }, ...settings.stages];
   $('#page-content').innerHTML = `<p class="muted">Mostrando até 100 conversas abertas e 100 aguardando, das mais recentes. Mover uma conversa aqui não envia mensagem. Configure mensagens por palavra-chave na aba Automações.</p><div class="funnel-board">${stages.map(s => `<section class="card funnel-column"><h2>${escape(s.name)}</h2>${rows.filter(c => s.id ? c.funnelStage === s.id : !settings.stages.some(x => x.id === c.funnelStage)).map(c => `<article class="funnel-item"><strong>${escape(c.contact.name || c.contact.waId)}</strong><p>${escape(c.lastMessage?.body || 'Sem mensagens')}</p><label>Etapa<select data-conversation="${escape(c.id)}"><option value="" disabled ${!c.funnelStage ? 'selected' : ''}>Selecionar etapa</option>${settings.stages.map(x => `<option value="${escape(x.id)}" ${x.id === c.funnelStage ? 'selected' : ''}>${escape(x.name)}</option>`).join('')}</select></label></article>`).join('') || '<p class="muted">Sem conversas nesta etapa.</p>'}</section>`).join('')}</div>`;
   $$('[data-conversation]').forEach(select => select.onchange = async () => { select.disabled = true; try { await api(`/conversations/${encoded(select.dataset.conversation)}/stage`, { method:'PATCH', body:body({ stageId:select.value }) }); await funnelPage(); } catch (err) { notice(err.message); select.disabled = false; } });
 }
 async function logsPage() {
+  const root = $('#page-content');
   let cursor = null;
   $('#page-content').innerHTML = '<section class="card"><div id="logs-list"></div><button class="outline" id="more-logs">Carregar mais</button></section>';
   const load = async () => {
-    const rows = await api(`/conversations?status=RESOLVED${cursor ? `&cursor=${encoded(cursor)}` : ''}`); if (session.page !== 'logs') return;
+    const rows = await api(`/conversations?status=RESOLVED${cursor ? `&cursor=${encoded(cursor)}` : ''}`); if (root !== $('#page-content') || session.page !== 'logs') return;
     $('#logs-list').insertAdjacentHTML('beforeend', rows.map(c => `<article class="data-row"><div class="avatar">✓</div><div><strong>${escape(c.contact.name || c.contact.waId)}</strong><p>${escape(c.lastMessage?.body || '')}</p><p>Finalizado por: <strong>${escape(c.resolvedByName || 'Não registrado (histórico anterior)')}</strong><br>${escape(date(c.resolvedAt))}</p></div><span class="role">${escape(c.channel.name)}</span></article>`).join('') || (!cursor ? '<p class="muted">Nenhuma conversa finalizada.</p>' : ''));
     cursor = rows.at(-1)?.id; $('#more-logs').hidden = rows.length < 100;
   };
@@ -501,12 +527,13 @@ function invoiceLink(value) {
   try { const url = new URL(value); return url.protocol === 'https:' && (url.hostname === 'asaas.com' || url.hostname.endsWith('.asaas.com')) ? url.href : null; } catch { return null; }
 }
 async function billingPage() {
-  const status = await api('/billing/status'); if (session.page !== 'billing') return;
+  const root = $('#page-content');
+  const status = await api('/billing/status'); if (root !== $('#page-content') || session.page !== 'billing') return;
   const states = { PENDING:'Em aberto', OVERDUE:'Vencida', RECEIVED:'Paga', CONFIRMED:'Pagamento confirmado', RECEIVED_IN_CASH:'Paga em dinheiro', REFUNDED:'Estornada', REFUND_REQUESTED:'Estorno solicitado', CHARGEBACK_REQUESTED:'Contestada', DELETED:'Excluída', CANCELLED:'Cancelada' };
   $('#page-content').innerHTML = `<div class="metrics"><article><small>Plano</small><strong>${escape(status.plan.name)}</strong></article><article><small>Mensalidade atual</small><strong>${money(status.plan.priceCents / 100)}</strong></article><article><small>Assinatura</small><strong>${escape(status.subscription?.status || 'Não contratada')}</strong></article></div>${status.tenantStatus === 'SUSPENDED' ? '<p class="form-error">Acesso aos atendimentos suspenso. Regularize as cobranças e entre novamente após a confirmação do pagamento.</p>' : ''}<section class="card"><h2>Histórico de cobranças</h2><p class="muted">Cobranças vinculadas ao cliente Asaas desta empresa, incluindo cobranças avulsas. Atualizadas ao abrir esta tela.</p><p id="billing-count" class="muted"></p><div id="payments-list"></div><button id="more-payments" class="outline">Carregar mais</button></section>`;
   let offset = 0, paid = 0, loaded = 0;
   const load = async () => {
-    const result = await api(`/billing/payments?offset=${offset}`); if (session.page !== 'billing') return;
+    const result = await api(`/billing/payments?offset=${offset}`); if (root !== $('#page-content') || session.page !== 'billing') return;
     loaded += result.data.length; paid += result.data.filter(p => ['RECEIVED','CONFIRMED','RECEIVED_IN_CASH'].includes(p.status)).length;
     $('#billing-count').textContent = `${loaded} de ${result.totalCount} cobranças carregadas · ${paid} pagas/confirmadas entre as carregadas`;
     $('#payments-list').insertAdjacentHTML('beforeend', result.data.map(p => { const url = invoiceLink(p.invoiceUrl); return `<article class="data-row"><div><strong>${money(p.value)} · ${escape(states[p.status] || p.status)}</strong><p>${escape(p.description || 'Cobrança Nodus')}</p><p>Vencimento: ${escape(p.dueDate)}${p.paymentDate ? ` · Pagamento: ${escape(p.paymentDate)}` : ''}</p></div>${url ? `<a class="outline" href="${escape(url)}" target="_blank" rel="noopener noreferrer">Ver cobrança ↗</a>` : ''}</article>`; }).join('') || (!offset ? '<p class="muted">Nenhuma cobrança encontrada.</p>' : ''));
@@ -515,14 +542,15 @@ async function billingPage() {
   $('#more-payments').onclick = e => busy(e.currentTarget, load); await load();
 }
 async function reportsPage() {
-  const r = await api('/reports/summary'); if (session.page !== 'reports') return;
+  const root = $('#page-content');
+  const r = await api('/reports/summary'); if (root !== $('#page-content') || session.page !== 'reports') return;
   const counts = r.conversationsByStatus || {};
   $('#page-content').innerHTML = `<div class="metrics">${['OPEN','PENDING','RESOLVED'].map(k => `<article><small>${labels[k]}</small><strong>${escape(counts[k] || 0)}</strong></article>`).join('')}<article><small>Primeira resposta média</small><strong>${escape(r.averageFirstResponseMinutes == null ? '—' : `${r.averageFirstResponseMinutes} min`)}</strong></article></div><section class="card"><h2>Chamados finalizados por usuário</h2><p class="muted">Total de conversas atualmente finalizadas, por quem concluiu o atendimento. Não se limita aos últimos 7 dias. Conversas reabertas deixam esta contagem até serem finalizadas novamente.</p>${Array.isArray(r.resolvedByUser) ? (r.resolvedByUser.length ? r.resolvedByUser.map(u => `<div class="data-row"><strong>${escape(u.name)}</strong><span>${escape(u.count)} chamado(s) finalizado(s)</span></div>`).join('') : '<p class="muted">Nenhum chamado finalizado.</p>') : '<p class="muted">Atualize o backend para carregar os chamados por usuário.</p>'}</section><section class="card"><h2>Mensagens nos últimos 7 dias</h2>${(r.messagesLast7Days || []).map(x => `<div class="data-row"><strong>${escape(x.date)}</strong><span>${escape(x.count)} mensagens</span></div>`).join('')}</section>`;
 }
 function logout(revoke = false) {
   contactPhotos.clear();
   if (revoke && session.token) api('/auth/logout-all', { method:'POST', body:'{}' }).catch(() => notice('Você saiu deste navegador, mas não foi possível revogar as outras sessões.'));
-  session.token = null; session.user = null; session.tenant = null; session.active = null; session.conversations = []; session.messages = []; $('#modal')?.close(); renderLogin();
+  session.token = null; session.user = null; session.tenant = null; session.active = null; session.conversations = []; session.messages = []; session.tabs = {}; $('#modal')?.close(); renderLogin();
 }
 async function startApp() {
   const identity = await api('/auth/me'); session.user = identity.user; session.tenant = identity.tenant;
