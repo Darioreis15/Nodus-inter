@@ -134,8 +134,8 @@ seguranca e `Cache-Control: no-store` permanecem aplicados.
 
 A resposta tambem inclui `trueClientIp` (True-Client-IP) e `cfConnectingIp`
 (CF-Connecting-IP), limitados a 128 caracteres com indicadores de truncamento.
-Sao observacoes da requisicao recebida, nao headers da resposta nem identidades
-ja confiaveis. Esta alteracao nao muda `req.ip`, trust proxy ou rate limiting.
+Sao observacoes da requisicao recebida, nao headers da resposta. No modo padrao
+`express`, nao sao usados como identidade. A ativacao no Render esta descrita abaixo.
 
 Com `ENABLE_PROXY_DIAGNOSTICS=true`, JWT ADMIN e Postman desktop, chamar
 `GET https://nodus-inter.onrender.com/auth/proxy-diagnostics`, sem body:
@@ -154,7 +154,7 @@ X-Forwarded-For: 192.0.2.123
 Comparar os JSONs: os dois headers candidatos devem refletir a conexao de saida
 real, mudar com a rede e nao adotar os valores ficticios. Header ausente,
 truncado, divergente ou contendo valor injetado exige investigacao. `effectiveIp`
-pode continuar como `::1` nesta etapa: observar os headers nao corrige o limitador.
+pode continuar como `::1` antes da ativacao: observar os headers nao corrige o limitador.
 Nao usar X-Forwarded-For como identidade no Render, conforme orientacao do suporte.
 
 Registrar host e caminho testados. Repetir no dominio personalizado do backend,
@@ -163,6 +163,63 @@ possiveis nem a confiabilidade de chamadas internas. A rede privada e separada
 e os headers fornecidos por servicos internos nao ganham confianca automaticamente.
 Apos escolher e implementar a origem de IP, validar separadamente os contadores
 e o 429 por cliente. Desativar o diagnostico ao finalizar.
+
+### Ativar IP do visitante no limitador do Render
+
+Depois de confirmar a sanitizacao no acesso publico do seu servico:
+
+```env
+CLIENT_IP_SOURCE=render-true-client-ip
+ENABLE_PROXY_DIAGNOSTICS=true
+```
+
+Remover `TRUSTED_PROXY_CIDRS` do Render (nao preencher com true/false). Publicar.
+Localmente e em outros ambientes, manter `CLIENT_IP_SOURCE=express` (padrao).
+Modo desconhecido ou combinacao Render + TRUSTED_PROXY_CIDRS impede inicializacao
+com mensagem de configuracao. Sem migracao, seed ou alteracao do frontend.
+
+O limitador e o diagnostico usam a mesma funcao de resolucao. `effectiveIp` passa
+a ser o IP resolvido; `clientIpSource` mostra `true-client-ip`, `socket-fallback`
+ou `express`. `expressIp` continua mostrando req.ip e pode permanecer `::1`.
+Nenhum getter Express e sobrescrito. Os limites existentes permanecem: API 300/min,
+webhooks 600/min, login/recuperacao 10/min por IP, cadastro 5/h por IP. O limite
+adicional por conta de login/recuperacao permanece 10/15min.
+
+Aceita apenas um True-Client-IP com IPv4/IPv6 valido, sem lista, porta ou zone ID.
+Normaliza IPv6 e IPv4 mapeado para impedir contadores distintos por grafia.
+Ausencia, duplicacao ou formato invalido usa o socket (ou um bucket unknown),
+sem fallback para CF-Connecting-IP ou X-Forwarded-For. Isso pode agrupar clientes
+quando o provedor nao envia o header; nao desativa a limitacao nem cria buckets
+com strings arbitrarias. Os identificadores continuam armazenados como HMAC.
+
+Fronteira de confianca: este modo confia na sanitizacao do ingresso publico Render,
+nao na mera presenca de um header. Os testes de outubro de 2026 confirmaram
+True-Client-IP sobrescrito em acesso direto onrender.com, com e sem VPN. A chamada
+com tres headers ficticios foi rejeitada pela Cloudflare (erro 1000); isso nao
+prova isoladamente o comportamento de cada um. Outros dominios/CDNs/Workers
+precisam de validacao propria. Nao ativar em origem acessivel diretamente.
+Chamadas da rede privada nao sao autenticadas por estes headers; restringir acesso
+interno a servicos confiaveis ou manter ingresso separado que descarte headers
+fornecidos por esses chamadores. O socket loopback nao distingue esses caminhos.
+O modo nao fornece garantia contra servico interno comprometido. Revisar essas
+premissas ao mudar plano, rede, dominio ou provedor. IP nunca substitui JWT/API key.
+
+Validacao apos publicar (Postman desktop, JWT ADMIN, sem headers de IP manuais):
+1. GET /auth/proxy-diagnostics: effectiveIp deve acompanhar True-Client-IP,
+   clientIpSource=true-client-ip; repetir com VPN.
+2. Com apenas True-Client-IP: 203.0.113.123 manual, repetir nas duas redes:
+   effectiveIp deve continuar sendo a conexao real. Depois desmarcar o header.
+3. Para exercitar 429 sem afetar clientes, em homologacao, fazer ate 301 chamadas
+   GET /auth/proxy-diagnostics sequenciais dentro da mesma janela de minuto.
+   O contador inclui outras rotas API do mesmo IP. Parar no primeiro 429.
+   Se a janela virar, o contador reinicia; repetir em uma janela nova.
+4. Antes dessa janela terminar, alternar VPN/rede: deve haver bucket independente
+   e resposta 200 se o segundo IP nao tiver esgotado seu limite. Voltar ao IP
+   bloqueado deve manter 429 ate o fim da janela. Observar retryAfter no JSON.
+5. Desativar ENABLE_PROXY_DIAGNOSTICS, publicar e verificar 404 com JWT ADMIN.
+
+Rollback: CLIENT_IP_SOURCE=express e novo deploy (volta ao comportamento anterior,
+que no Render agrupava visitantes em ::1). Nao usar fallback automatico para XFF.
 
 ## Direitos e retencao
 

@@ -1,3 +1,4 @@
+import { resolveClientIp } from '../security/client-ip';
 import { Controller, Get, Header, NotFoundException, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -16,8 +17,11 @@ export class ProxyDiagnosticsController {
     const forwarded = req.get('x-forwarded-for');
     const trueClientIp = req.get('true-client-ip');
     const cfConnectingIp = req.get('cf-connecting-ip');
+    const client = resolveClientIp(req);
     return {
-      effectiveIp: req.ip ?? null,
+      effectiveIp: client.ip,
+      clientIpSource: client.source,
+      expressIp: req.ip ?? null,
       socketIp: req.socket.remoteAddress ?? null,
       forwardedFor: forwarded?.slice(0, 1024) ?? null,
       forwardedForTruncated: (forwarded?.length ?? 0) > 1024,
