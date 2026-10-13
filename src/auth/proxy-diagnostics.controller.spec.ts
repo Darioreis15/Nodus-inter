@@ -49,21 +49,41 @@ describe('Proxy diagnostics HTTP access', () => {
   });
   it('shows only diagnostic fields and does not trust a spoofed forwarding header', async () => {
     const res = await get().auth(token, { type: 'bearer' })
-      .set('X-Forwarded-For', '203.0.113.123').set('Cookie', 'private=secret').expect(200);
+      .set('X-Forwarded-For', '203.0.113.123')
+      .set('True-Client-IP', '198.51.100.123')
+      .set('CF-Connecting-IP', '192.0.2.123')
+      .set('Cookie', 'private=secret').expect(200);
     expect(res.body).toEqual({
       effectiveIp: expect.any(String), socketIp: expect.any(String),
       forwardedFor: '203.0.113.123', forwardedForTruncated: false,
+      trueClientIp: '198.51.100.123', trueClientIpTruncated: false,
+      cfConnectingIp: '192.0.2.123', cfConnectingIpTruncated: false,
       trustedChain: [], trustedChainTruncated: false,
     });
     expect(res.body.effectiveIp).toBe(res.body.socketIp);
     expect(res.body.effectiveIp).not.toBe('203.0.113.123');
+    expect(res.body.effectiveIp).not.toBe(res.body.trueClientIp);
+    expect(res.body.effectiveIp).not.toBe(res.body.cfConnectingIp);
     expect(res.headers['cache-control']).toBe('no-store');
     expect(rateBucket.upsert).toHaveBeenCalled();
   });
+  it('reports absent provider headers without inferring a client IP', async () => {
+    const res = await get().auth(token, { type: 'bearer' }).expect(200);
+    expect(res.body.trueClientIp).toBeNull();
+    expect(res.body.cfConnectingIp).toBeNull();
+    expect(res.body.trueClientIpTruncated).toBe(false);
+    expect(res.body.cfConnectingIpTruncated).toBe(false);
+  });
   it('bounds attacker-controlled header output', async () => {
     const res = await get().auth(token, { type: 'bearer' })
-      .set('X-Forwarded-For', 'a'.repeat(2000)).expect(200);
+      .set('X-Forwarded-For', 'a'.repeat(2000))
+      .set('True-Client-IP', 'b'.repeat(2000))
+      .set('CF-Connecting-IP', 'c'.repeat(2000)).expect(200);
     expect(res.body.forwardedFor).toHaveLength(1024);
     expect(res.body.forwardedForTruncated).toBe(true);
+    expect(res.body.trueClientIp).toHaveLength(128);
+    expect(res.body.trueClientIpTruncated).toBe(true);
+    expect(res.body.cfConnectingIp).toHaveLength(128);
+    expect(res.body.cfConnectingIpTruncated).toBe(true);
   });
 });
