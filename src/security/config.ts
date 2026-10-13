@@ -1,3 +1,5 @@
+import { clientIpSource } from './client-ip';
+
 export function jwtSecret(): string {
   const value = process.env.JWT_SECRET;
   if (!value || value.length < 32 || /troque|changeme/i.test(value)) {
@@ -8,6 +10,9 @@ export function jwtSecret(): string {
 
 export function validateSecurityConfig() {
   jwtSecret();
+  if (clientIpSource() === 'render-true-client-ip' && process.env.TRUSTED_PROXY_CIDRS?.trim()) {
+    throw new Error('Remova TRUSTED_PROXY_CIDRS ao usar CLIENT_IP_SOURCE=render-true-client-ip.');
+  }
   if (!/^[a-fA-F0-9]{64}$/.test(process.env.DATA_ENCRYPTION_KEY || '')) {
     throw new Error('DATA_ENCRYPTION_KEY deve ser uma chave hexadecimal de 32 bytes.');
   }

@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, HttpException } from '@nestjs/common';
 import { createHmac } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveClientIp } from './client-ip';
 import { jwtSecret } from './config';
 
 @Injectable()
@@ -16,7 +17,7 @@ export class RateGuard implements CanActivate {
     const scope = login ? 'login' : registration ? 'register' : webhook ? 'webhooks' : 'api';
     const limit = login ? 10 : registration ? 5 : webhook ? 600 : 300;
     const ttl = registration ? 3600000 : 60000;
-    const identity = req.ip || req.socket.remoteAddress;
+    const identity = resolveClientIp(req).ip;
     const result = await this.consume(`${scope}:ip:${identity}`, limit, ttl);
     if (login && typeof req.body?.email === 'string') {
       await this.consume(`login:account:${req.body.email.toLowerCase().trim()}`, 10, 900000);

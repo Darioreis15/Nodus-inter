@@ -1,3 +1,4 @@
+import * as ipaddr from 'ipaddr.js';
 import { Test } from '@nestjs/testing';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { JwtService } from '@nestjs/jwt';
@@ -19,6 +20,7 @@ describe('Proxy diagnostics HTTP access', () => {
     process.env.ASAAS_WEBHOOK_TOKEN = 'test-only-asaas-token';
     process.env.CORS_ORIGINS = 'https://app.example.com';
     delete process.env.TRUSTED_PROXY_CIDRS;
+    delete process.env.CLIENT_IP_SOURCE;
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PrismaService).useValue({
         user: { findFirst: jest.fn(async () => ({ role, tokenVersion: 0, mustChangePassword: false })) },
@@ -30,7 +32,7 @@ describe('Proxy diagnostics HTTP access', () => {
     configureHttp(app);
     await app.init();
   });
-  beforeEach(() => { role = 'ADMIN'; process.env.ENABLE_PROXY_DIAGNOSTICS = 'true'; });
+  beforeEach(() => { delete process.env.CLIENT_IP_SOURCE; role = 'ADMIN'; process.env.ENABLE_PROXY_DIAGNOSTICS = 'true'; });
   afterAll(async () => { await app?.close(); process.env = previous; });
   const get = () => request(app.getHttpServer()).get('/auth/proxy-diagnostics');
 
@@ -54,13 +56,13 @@ describe('Proxy diagnostics HTTP access', () => {
       .set('CF-Connecting-IP', '192.0.2.123')
       .set('Cookie', 'private=secret').expect(200);
     expect(res.body).toEqual({
-      effectiveIp: expect.any(String), socketIp: expect.any(String),
+      effectiveIp: expect.any(String), clientIpSource: 'express', expressIp: expect.any(String), socketIp: expect.any(String),
       forwardedFor: '203.0.113.123', forwardedForTruncated: false,
       trueClientIp: '198.51.100.123', trueClientIpTruncated: false,
       cfConnectingIp: '192.0.2.123', cfConnectingIpTruncated: false,
       trustedChain: [], trustedChainTruncated: false,
     });
-    expect(res.body.effectiveIp).toBe(res.body.socketIp);
+    expect(res.body.effectiveIp).toBe(ipaddr.process(res.body.socketIp).toString());
     expect(res.body.effectiveIp).not.toBe('203.0.113.123');
     expect(res.body.effectiveIp).not.toBe(res.body.trueClientIp);
     expect(res.body.effectiveIp).not.toBe(res.body.cfConnectingIp);
@@ -73,6 +75,14 @@ describe('Proxy diagnostics HTTP access', () => {
     expect(res.body.cfConnectingIp).toBeNull();
     expect(res.body.trueClientIpTruncated).toBe(false);
     expect(res.body.cfConnectingIpTruncated).toBe(false);
+  });
+  it('reports the effective Render identity used by the guard', async () => {
+    process.env.CLIENT_IP_SOURCE = 'render-true-client-ip';
+    const res = await get().auth(token, { type: 'bearer' })
+      .set('True-Client-IP', '203.0.113.8').expect(200);
+    expect(res.body.effectiveIp).toBe('203.0.113.8');
+    expect(res.body.clientIpSource).toBe('true-client-ip');
+    expect(res.body.expressIp).toBe(res.body.socketIp);
   });
   it('bounds attacker-controlled header output', async () => {
     const res = await get().auth(token, { type: 'bearer' })
