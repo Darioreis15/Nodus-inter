@@ -63,6 +63,42 @@ const server = http.createServer((req,res) => {
     async function login(){await page.locator('[name=email]').fill('ANA@EXAMPLE.COM');await page.locator('[name=password]').fill('test-password-123');await page.locator('#login-form button').click();}
     await page.goto(base);await page.screenshot({path:path.join(screenshotDir,'login.png')});await login();
     await page.locator('.conversation').first().waitFor({timeout:5000}).catch(async e=>{console.log('REQUESTS',requests);console.log('BODY',await page.locator('body').innerText());throw e});assert.equal(loginEmail,'ana@example.com');assert.equal(await page.evaluate(()=>localStorage.getItem('nodus_token')),null);
+    // Appearance preference is browser-only, persists on reload and reacts to OS changes.
+    assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+    await page.locator('[data-page=settings]').click();
+    await page.getByRole('tab',{name:'Aparência',exact:true}).click();
+    await page.locator('[name=appearance-theme][value=light]').check();
+    assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+    assert.equal(await page.evaluate(()=>localStorage.getItem('nodus_theme')),'light');
+    await page.screenshot({path:path.join(screenshotDir,'appearance-light.png')});
+    await page.setViewportSize({width:390,height:844});
+    await page.screenshot({path:path.join(screenshotDir,'appearance-mobile.png')});
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    await page.setViewportSize({width:1440,height:960});
+    await page.locator('[data-filter=OPEN]').click();
+    await page.locator('.conversation').first().click();
+    await page.screenshot({path:path.join(screenshotDir,'inbox-light.png')});
+    await page.locator('[data-page=settings]').click();
+    await page.getByRole('tab',{name:'Aparência',exact:true}).click();
+    await page.emulateMedia({colorScheme:'light'});
+    await page.locator('[name=appearance-theme][value=system]').check();
+    assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+    await page.emulateMedia({colorScheme:'dark'});
+    await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
+    await page.locator('[name=appearance-theme][value=light]').check();
+    await page.reload();
+    assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+    await page.screenshot({path:path.join(screenshotDir,'login-light.png')});
+    await login();
+    await page.locator('.conversation').first().waitFor();
+    // Separate tabs receive changes without a reload.
+    const sibling=await context.newPage();await sibling.goto(base);
+    await sibling.evaluate(()=>window.NodusTheme.setPreference('dark'));
+    await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
+    assert.equal(await sibling.evaluate(() => { Storage.prototype.setItem = () => { throw new Error('blocked'); }; return window.NodusTheme.setPreference('light'); }),false);
+    assert.equal(await sibling.locator('html').getAttribute('data-theme'),'light');
+    await sibling.close();
+    await page.evaluate(()=>window.NodusTheme.setPreference('light'));
     await page.locator('.conversation').first().click();await page.locator('#message-form textarea').fill('<img src=x onerror=alert(1)>');await page.locator('#message-form button').click();
     await page.getByText('<img src=x onerror=alert(1)>',{exact:true}).first().waitFor();assert.equal(await page.locator('#messages img').count(),0);
     await page.screenshot({path:path.join(screenshotDir,'inbox.png')});
@@ -83,6 +119,10 @@ const server = http.createServer((req,res) => {
     forced=true;await login();await page.locator('#password-form').waitFor();await page.locator('[name=currentPassword]').fill('temporary');await page.locator('[name=newPassword]').fill('New-password-123');await page.locator('#password-form button').click();await page.locator('#login-form').waitFor();
     tenantStatus='SUSPENDED';await login();await page.locator('#payments-list').waitFor();assert.equal(await page.locator('[data-filter=OPEN]').count(),0);
     await page.locator('#logout').click();user.role='AGENT';tenantStatus='ACTIVE';await login();await page.locator('.conversation').first().waitFor();assert.equal(await page.locator('[data-page=connections]').count(),0);
+    await page.locator('[data-page=settings]').click();
+    await page.getByRole('tab',{name:'Aparência',exact:true}).click();
+    await page.locator('[name=appearance-theme][value=dark]').check();
+    assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
     assert.deepEqual(errors,[]);console.log('Frontend smoke passed: login, XSS, create twice without reload, QR sanitization, settings, temporary password, logs, billing, mobile, expired session, forced password change, suspended admin, agent navigation.');
   } finally {await browser.close();server.close();}
 })().catch(err=>{console.error(err);server.close();process.exitCode=1;});

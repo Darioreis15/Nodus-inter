@@ -170,7 +170,7 @@ function sendTemplate(c) {
 function openPage(page) {
   session.page = page; session.active = null; session.generation++;
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.page === page)); $('.inbox').style.display = 'none';
-  const titles = { campaigns:['Campanhas e follow-ups','Envios agendados com acompanhamento por destinatário.'], connections:['Conexões','Gerencie os canais e números da sua empresa.'], settings:['Configurações','Sua conta, expediente e integrações.'], automations:['Automações','Mensagens automáticas e regras de atendimento.'], users:['Operadores','Acessos e disponibilidade da equipe.'], billing:['Mensalidades','Acompanhe as cobranças da sua empresa no Asaas.'], logs:['Logs de conversas','Identifique quem finalizou cada atendimento.'], funnel:['Funil de atendimento','Organize as conversas por etapa.'], reports:['Relatórios','Indicadores da sua operação.'] };
+  const titles = { campaigns:['Campanhas e follow-ups','Envios agendados com acompanhamento por destinatário.'], connections:['Conexões','Gerencie os canais e números da sua empresa.'], settings:['Configurações','Sua conta, aparência, expediente e integrações.'], automations:['Automações','Mensagens automáticas e regras de atendimento.'], users:['Operadores','Acessos e disponibilidade da equipe.'], billing:['Mensalidades','Acompanhe as cobranças da sua empresa no Asaas.'], logs:['Logs de conversas','Identifique quem finalizou cada atendimento.'], funnel:['Funil de atendimento','Organize as conversas por etapa.'], reports:['Relatórios','Indicadores da sua operação.'] };
   const [title, sub] = titles[page]; const chat = $('#chat'); chat.className = 'page';
   chat.innerHTML = `<header class="page-header"><p class="eyebrow">PAINEL NODUS</p><h1>${title}</h1><p>${sub}</p></header><div class="page-content" id="page-content"><p class="loading">Carregando…</p></div>`;
   ({ campaigns:campaignsPage, connections:connectionsPage, settings:settingsPage, automations:automationsPage, users:usersPage, billing:billingPage, logs:logsPage, funnel:funnelPage, reports:reportsPage })[page]().then(() => { if (session.page === page) organizePageTabs(page); }).catch(err => { if (session.page === page) $('#page-content').textContent = err.message; });
@@ -183,7 +183,7 @@ function organizePageTabs(page) {
   const cardFor = selector => $(selector, root)?.closest('.card');
   if (page === 'settings') {
     panels = [['E-mail', cardFor('#email-form')], ['Senha', cardFor('#account-password-form')],
-      ['Expediente', cardFor('#settings-form')], ['Integrações', cardFor('#key-form')]];
+      ['Aparência', cardFor('#appearance-settings')], ['Expediente', cardFor('#settings-form')], ['Integrações', cardFor('#key-form')]];
   } else if (page === 'connections') {
     panels = [['Meus canais', cardFor('#channel-list')], ['Novo canal', cardFor('#channel-form')]];
   } else if (page === 'users') {
@@ -314,6 +314,7 @@ async function settingsPage() {
 }
 function accountSettings() {
   $('#account-settings').innerHTML = `<div class="page-grid"><section class="card"><h2>Alterar meu e-mail</h2><form id="email-form"><label>Novo e-mail<input name="email" type="email" maxlength="254" value="${escape(session.user.email)}" required autocomplete="email"></label><label>Confirme o novo e-mail<input name="confirmation" type="email" required></label><label>Senha atual<input name="currentPassword" type="password" required autocomplete="current-password"></label><p class="muted">Use um e-mail ao qual você tem acesso. Após a alteração, entre novamente com o novo endereço.</p><button class="primary">Alterar e-mail</button></form></section><section class="card"><h2>Alterar minha senha</h2><form id="account-password-form"><label>Senha atual<input name="currentPassword" type="password" required autocomplete="current-password"></label><label>Nova senha (mínimo 12 caracteres)<input name="newPassword" type="password" minlength="12" required autocomplete="new-password"></label><label>Confirme a nova senha<input name="confirmation" type="password" required autocomplete="new-password"></label><button class="primary">Alterar senha</button></form></section></div>`;
+  appearanceSettings();
   bindForm('#email-form', async data => {
     const email = data.email.trim().toLowerCase();
     if (email !== data.confirmation.trim().toLowerCase()) throw new Error('Os e-mails não coincidem.');
@@ -324,6 +325,20 @@ function accountSettings() {
     if (data.newPassword !== data.confirmation) throw new Error('As senhas não coincidem.');
     await api('/auth/change-password', { method:'POST', body:body({ currentPassword:data.currentPassword, newPassword:data.newPassword }) });
     logout(false); notice('Senha alterada. Entre novamente.');
+  });
+}
+function appearanceSettings() {
+  const section = document.createElement('section'); section.className = 'card';
+  section.innerHTML = `<div id="appearance-settings"><h2>Aparência</h2><p class="muted">Escolha como deseja visualizar a Nodus. A preferência vale para este navegador, inclusive na tela de login.</p><fieldset class="appearance-options"><legend>Tema do aplicativo</legend>${[
+    ['light', 'Claro', 'Superfícies claras e detalhes dourados.'],
+    ['dark', 'Escuro', 'O visual azul-escuro da Nodus.'],
+    ['system', 'Automático', 'Acompanha o tema do seu dispositivo.'],
+  ].map(([value, label, description]) => `<label class="appearance-option"><span class="theme-swatch ${value}" aria-hidden="true"></span><span class="appearance-label"><input type="radio" name="appearance-theme" value="${value}" ${window.NodusTheme.getPreference() === value ? 'checked' : ''}>${label}</span><small>${description}</small></label>`).join('')}</fieldset><p id="appearance-status" class="muted" role="status">A alteração é aplicada imediatamente.</p></div>`;
+  $('#account-settings .page-grid').append(section);
+  section.addEventListener('change', event => {
+    if (event.target.name !== 'appearance-theme') return;
+    const saved = window.NodusTheme.setPreference(event.target.value);
+    $('#appearance-status', section).textContent = saved ? 'Preferência salva neste navegador.' : 'Tema aplicado nesta sessão. O navegador não permitiu salvar a preferência.';
   });
 }
 function departmentOptions(departments, selected) { return '<option value="">Sem setor</option>' + departments.map(d => `<option value="${escape(d.id)}" ${d.id === selected ? 'selected' : ''}>${escape(d.name)}</option>`).join(''); }
