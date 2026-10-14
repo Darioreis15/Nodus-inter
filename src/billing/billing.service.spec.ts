@@ -1,4 +1,5 @@
-import { ConflictException, UnprocessableEntityException } from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
+import { ForbiddenException, NotFoundException, ServiceUnavailableException, ConflictException, UnprocessableEntityException } from '@nestjs/common';
 import { BillingService } from './billing.service';
 
 describe('BillingService', () => {
@@ -11,11 +12,16 @@ describe('BillingService', () => {
       subscription: { findUnique: jest.fn(), create: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
       tenant: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
     };
+    prisma.user = { findFirst: jest.fn() };
+    prisma.campaign = { updateMany: jest.fn() };
+    prisma.campaignDelivery = { updateMany: jest.fn() };
+    prisma.subscription.updateMany = jest.fn().mockResolvedValue({ count: 1 });
     prisma.$transaction = jest.fn((fn: any) => fn(prisma));
     prisma.$queryRaw = jest.fn();
     prisma.auditEvent = { create: jest.fn() };
     prisma.providerEvent = { findUnique: jest.fn(), create: jest.fn() };
     asaas = {
+      stopRecurrence: jest.fn(),
       createCustomer: jest.fn(),
       createSubscription: jest.fn(),
       getSubscriptionPayments: jest.fn(),
@@ -76,6 +82,14 @@ describe('BillingService', () => {
   });
 
   describe('handlePaymentEvent', () => {
+    beforeEach(() => prisma.subscription.findUnique.mockResolvedValue({ id: 'sub-1', status: 'ACTIVE' }));
+    it('ignora pagamento antigo quando cancelamento venceu a corrida pelo lock', async () => {
+      prisma.subscription.findFirst.mockResolvedValue({ id: 'sub-1', tenantId: 'tenant-1', status: 'ACTIVE' });
+      prisma.subscription.findUnique.mockResolvedValue({ id: 'sub-1', status: 'CANCELED' });
+      await service.handlePaymentEvent('PAYMENT_RECEIVED', { payment: { subscription: 'sub_123' } });
+      expect(asaas.getSubscriptionPayments).not.toHaveBeenCalled();
+      expect(prisma.tenant.update).not.toHaveBeenCalled();
+    });
     it('ativa o tenant quando o pagamento e confirmado', async () => {
       prisma.subscription.findFirst.mockResolvedValue({ id: 'sub-1', tenantId: 'tenant-1' });
 
@@ -117,4 +131,50 @@ describe('BillingService', () => {
       expect(prisma.tenant.update).not.toHaveBeenCalled();
     });
   });
+  describe('cancel', () => {
+    const dto = { currentPassword: 'senha-correta', confirmation: 'CANCEL' };
+    beforeEach(async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'admin', tenantId: 'tenant-1', role: 'ADMIN', passwordHash: await bcrypt.hash(dto.currentPassword, 4) });
+      prisma.subscription.findUnique.mockResolvedValue({ id: 'sub-1', status: 'ACTIVE', asaasSubscriptionId: 'sub_123' });
+      prisma.subscription.update.mockResolvedValue({ id: 'sub-1', status: 'CANCELED', cancellationPending: true, asaasSubscriptionId: 'sub_123' });
+    });
+    it('exige senha correta antes de mudar estado ou chamar provedor', async () => {
+      await expect(service.cancel('tenant-1', 'admin', { ...dto, currentPassword: 'errada' })).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(asaas.stopRecurrence).not.toHaveBeenCalled();
+    });
+    it('rejeita agente e usuario de outra empresa', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+      await expect(service.cancel('other', 'admin', dto)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.user.findFirst).toHaveBeenCalledWith({where:{id:'admin',tenantId:'other'}});
+      prisma.user.findFirst.mockResolvedValue({ role: 'AGENT' });
+      await expect(service.cancel('tenant-1', 'agent', dto)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+    it('nao suspende empresa sem assinatura', async () => {
+      prisma.subscription.findUnique.mockResolvedValue(null);
+      await expect(service.cancel('tenant-1', 'admin', dto)).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.tenant.update).not.toHaveBeenCalled();
+    });
+    it('bloqueia acesso e cancela fila antes de parar recorrencia, sem excluir historico', async () => {
+      expect(await service.cancel('tenant-1', 'admin', dto)).toEqual(expect.objectContaining({ cancellationPending: false, historyPreserved: true }));
+      expect(prisma.tenant.update).toHaveBeenCalledWith({where:{id:'tenant-1'},data:{status:'SUSPENDED'}});
+      expect(prisma.campaignDelivery.updateMany).toHaveBeenCalledWith(expect.objectContaining({where:{campaign:{tenantId:'tenant-1'},status:'QUEUED'}}));
+      expect(asaas.stopRecurrence).toHaveBeenCalledWith('sub_123');
+      expect(prisma.subscription.update.mock.invocationCallOrder[0]).toBeLessThan(asaas.stopRecurrence.mock.invocationCallOrder[0]);
+    });
+    it('mantem pendencia duravel quando Asaas falha e permite repetir', async () => {
+      asaas.stopRecurrence.mockRejectedValueOnce(new Error('timeout'));
+      await expect(service.cancel('tenant-1', 'admin', dto)).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(prisma.subscription.updateMany).not.toHaveBeenCalled();
+      prisma.subscription.findUnique.mockResolvedValue({id:'sub-1',status:'CANCELED',cancellationPending:true,asaasSubscriptionId:'sub_123'});
+      await expect(service.cancel('tenant-1', 'admin', dto)).resolves.toEqual(expect.objectContaining({ cancellationPending:false }));
+      expect(asaas.stopRecurrence).toHaveBeenCalledTimes(2);
+    });
+    it('repeticao concluida nao chama novamente o Asaas', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({id:'sub-1',status:'CANCELED',cancellationPending:false});
+      await service.cancel('tenant-1', 'admin', dto);
+      expect(asaas.stopRecurrence).not.toHaveBeenCalled();
+    });
+  });
+
 });

@@ -1,4 +1,6 @@
-import { ConflictException, UnprocessableEntityException, Injectable, Logger } from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
+import { CancelSubscriptionDto } from './dto/cancel-subscription.dto';
+import { BadRequestException, ForbiddenException, NotFoundException, ServiceUnavailableException, ConflictException, UnprocessableEntityException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AsaasClient } from './asaas.client';
 import { SubscribeDto } from './dto/subscribe.dto';
@@ -68,6 +70,58 @@ export class BillingService {
     };
   }
 
+  async cancel(tenantId: string, actorId: string, dto: CancelSubscriptionDto) {
+    if (dto.confirmation !== 'CANCEL') throw new BadRequestException('Confirme com CANCEL.');
+    const actor = await this.prisma.user.findFirst({ where: { id: actorId, tenantId } });
+    if (!actor || actor.role !== 'ADMIN' || !await bcrypt.compare(dto.currentPassword, actor.passwordHash)) {
+      throw new ForbiddenException('Confirmacao de identidade invalida.');
+    }
+    // Persist the intent BEFORE the remote call. Timeouts cannot reopen local access.
+    const subscription = await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
+      const currentActor = await tx.user.findFirst({ where: { id: actorId, tenantId } });
+      if (!currentActor || currentActor.role !== 'ADMIN' || currentActor.passwordHash !== actor.passwordHash) {
+        throw new ForbiddenException('Credenciais alteradas. Entre novamente.');
+      }
+      await tx.$queryRaw`SELECT id FROM subscriptions WHERE tenant_id = ${tenantId} FOR UPDATE`;
+      const sub = await tx.subscription.findUnique({ where: { tenantId } });
+      if (!sub) throw new NotFoundException('Empresa sem assinatura para encerrar.');
+      await tx.tenant.update({ where: { id: tenantId }, data: { status: 'SUSPENDED' } });
+      await tx.campaign.updateMany({ where: { tenantId, state: { not: 'CANCELLED' } }, data: { state: 'CANCELLED' } });
+      await tx.campaignDelivery.updateMany({
+        where: { campaign: { tenantId }, status: 'QUEUED' },
+        data: { status: 'CANCELLED', payload: {}, finishedAt: new Date() },
+      });
+      if (sub.status === 'CANCELED') return sub;
+      const updated = await tx.subscription.update({ where: { id: sub.id }, data: {
+        status: 'CANCELED', cancellationPending: true, canceledAt: new Date(),
+      } });
+      await tx.auditEvent.create({ data: { tenantId, actorId, action: 'billing.cancellation_requested' } });
+      return updated;
+    });
+    if (subscription.cancellationPending) {
+      try {
+        // Setting INACTIVE repeatedly is safe and preserves existing receivables.
+        await this.asaas.stopRecurrence(subscription.asaasSubscriptionId);
+      } catch {
+        throw new ServiceUnavailableException({
+          statusCode: 503, code: 'CANCELLATION_PENDING',
+          message: 'Acesso bloqueado. Asaas ainda nao confirmou a interrupcao. Repita POST /billing/cancel com a mesma confirmacao.',
+          tenantStatus: 'SUSPENDED', subscriptionStatus: 'CANCELED', cancellationPending: true,
+        });
+      }
+      await this.prisma.$transaction(async tx => {
+        const updated = await tx.subscription.updateMany({
+          where: { id: subscription.id, status: 'CANCELED', cancellationPending: true },
+          data: { cancellationPending: false },
+        });
+        if (updated.count) await tx.auditEvent.create({ data: { tenantId, actorId, action: 'billing.canceled' } });
+      });
+    }
+    return { tenantStatus: 'SUSPENDED', subscriptionStatus: 'CANCELED',
+      cancellationPending: false, existingPaymentsPreserved: true, historyPreserved: true };
+  }
+
   async payments(tenantId: string, offset: number) {
     const subscription = await this.prisma.subscription.findUnique({ where: { tenantId } });
     if (!subscription) return { data: [], hasMore: false, totalCount: 0 };
@@ -89,7 +143,7 @@ export class BillingService {
       tenantStatus: tenant.status,
       plan: { name: tenant.plan.name, priceCents: tenant.plan.priceCents },
       subscription: subscription
-        ? { status: subscription.status, createdAt: subscription.createdAt }
+        ? { status: subscription.status, createdAt: subscription.createdAt, canceledAt: subscription.canceledAt, cancellationPending: subscription.cancellationPending }
         : null,
     };
   }
@@ -117,7 +171,11 @@ export class BillingService {
     if (!['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED', 'PAYMENT_OVERDUE'].includes(event)) return { ok: true };
     // Reconciliacao autoritativa: um payload manual/antigo nao decide o saldo.
     await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${subscription.tenantId} FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM subscriptions WHERE id = ${subscription.id} FOR UPDATE`;
+      // Re-read under the same locks used by cancellation; the pre-lock snapshot may be stale.
+      const current = await tx.subscription.findUnique({ where: { id: subscription.id } });
+      if (!current || current.status === 'CANCELED') return;
       const eventId = typeof payload?.id === 'string' ? `asaas:${payload.id}` : null;
       if (eventId && await tx.providerEvent.findUnique({ where: { id: eventId } })) return;
       const overdue = await this.asaas.getSubscriptionPayments(asaasSubscriptionId, 'OVERDUE');

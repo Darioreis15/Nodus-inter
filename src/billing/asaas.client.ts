@@ -44,6 +44,16 @@ export class AsaasClient {
     );
   }
 
+  async stopRecurrence(id: string): Promise<void> {
+    const result = await this.request<{ id: string; status: string }>(
+      `/subscriptions/${encodeURIComponent(id)}`,
+      { method: 'PUT', body: JSON.stringify({ status: 'INACTIVE' }) },
+    );
+    if (!result || result.id !== id || result.status !== 'INACTIVE') {
+      throw new BadGatewayException('Asaas nao confirmou a interrupcao da recorrencia.');
+    }
+  }
+
   cancelSubscription(id: string) {
     return this.request(`/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
