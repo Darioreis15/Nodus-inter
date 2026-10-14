@@ -12,7 +12,7 @@ export function renderStep(step: CampaignStepDto, recipient: CampaignRecipientDt
     return values[key];
   });
   const result = step.type === 'TEXT' ? { ...step, text:render(step.text || '') } : { ...step, template:{ ...step.template!, parameters:step.template!.parameters.map(render) } };
-  if (result.type === 'TEXT' && !/\b(?:responda|digite|envie)\s+["“']?sair\b/i.test(result.text || '')) result.text += '\n\nPara não receber mais campanhas, responda SAIR.';
+  if (result.type === 'TEXT' && !/\b(?:responda|digite|envie)\s+["“']?sair\b/i.test(result.text || '')) result.text += '\n\nPara não receber mais mensagens, responda SAIR.';
   if ((result.text?.length || 0) > 4000 || result.template?.parameters.some(p => p.length > 1024)) throw new BadRequestException('Mensagem personalizada excede o limite.');
   return result;
 }

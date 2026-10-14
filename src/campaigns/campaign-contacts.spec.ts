@@ -42,7 +42,7 @@ describe('Contatos elegiveis para campanhas',()=>{
  });
  it('inclui instrucao de saida sem duplicar uma orientacao ja escrita',()=>{
   const s:any={type:'TEXT',text:'Ola {{nome}}',delayMinutes:0};
-  expect(renderStep(s,{phone:'5531999999999',name:'Maria'}).text).toBe('Ola Maria\n\nPara não receber mais campanhas, responda SAIR.');
+  expect(renderStep(s,{phone:'5531999999999',name:'Maria'}).text).toBe('Ola Maria\n\nPara não receber mais mensagens, responda SAIR.');
   expect(renderStep({...s,text:'Ola. Responda SAIR para cancelar.'},{phone:'5531999999999'}).text).toBe('Ola. Responda SAIR para cancelar.');
   expect(()=>renderStep({...s,text:'x'.repeat(3990)},{phone:'5531999999999'})).toThrow();
   const template:any={type:'TEMPLATE',delayMinutes:0,template:{name:'aviso',language:'pt_BR',parameters:['{{nome}}']}};

@@ -12,7 +12,7 @@ describe('Campaign queue boundaries',()=>{
  it('personalizes each payload, persists schedule and never sends during creation',async()=>{
   const {service,db,conversations}=setup();await service.create('tenant',dto);
   const rows=db.campaignDelivery.createMany.mock.calls[0][0].data;
-  expect(rows[0].payload.text).toBe('Oi Ana: https://example.com/invoice/123\n\nPara não receber mais campanhas, responda SAIR.');
+  expect(rows[0].payload.text).toBe('Oi Ana: https://example.com/invoice/123\n\nPara não receber mais mensagens, responda SAIR.');
   expect(rows[1].dueAt.getTime()-rows[0].dueAt.getTime()).toBe(86400000);
   expect(conversations.sendMessage).not.toHaveBeenCalled();
  });
