@@ -1,3 +1,4 @@
+import { BillingCalendar, firstCalendarMonth, saoPauloDate } from './billing-calendar';
 import { assertPlatformOwner } from '../owner/owner-access';
 import * as bcrypt from 'bcryptjs';
 import { CancelSubscriptionDto } from './dto/cancel-subscription.dto';
@@ -13,9 +14,11 @@ export class BillingService {
   constructor(
     private prisma: PrismaService,
     private asaas: AsaasClient,
+    private calendar?: BillingCalendar,
   ) {}
 
   async subscribe(tenantId: string, dto: SubscribeDto) {
+    if (process.env.BILLING_CALENDAR_ENABLED === 'true') return this.subscribeCalendar(tenantId, dto);
     const existing = await this.prisma.subscription.findUnique({ where: { tenantId } });
     if (existing) {
       throw new ConflictException('Esse tenant ja tem uma assinatura.');
@@ -71,6 +74,25 @@ export class BillingService {
     };
   }
 
+  private async subscribeCalendar(tenantId: string, dto: SubscribeDto) {
+    const start = firstCalendarMonth(saoPauloDate());
+    const sub = await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
+      if (await tx.subscription.findUnique({ where: { tenantId } })) throw new ConflictException('Empresa ja possui contrato.');
+      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId }, include: { plan: true } });
+      if (!Number.isSafeInteger(tenant.plan.priceCents) || tenant.plan.priceCents < 500) throw new UnprocessableEntityException('Plano precisa de valor valido, minimo R$ 5.');
+      const customer = await this.asaas.createCustomer({ name: tenant.name, cpfCnpj: dto.cpfCnpj, email: dto.email });
+      if (!customer?.id) throw new ServiceUnavailableException('Cadastro no Asaas nao confirmado.');
+      const created = await tx.subscription.create({ data: { tenantId, asaasCustomerId: customer.id, status: 'PENDING',
+        calendarEnabled: true, billingPriceCents: tenant.plan.priceCents, billingStartMonth: start, billingOptions: { billingType: 'UNDEFINED' } } });
+      await tx.auditEvent.create({ data: { tenantId, action: `billing.calendar_enrolled:${start}` } });
+      return created;
+    }, { timeout: 20000, maxWait: 5000 });
+    return { subscriptionId: sub.id, status: 'PENDING', invoiceUrl: null, scheduled: true,
+      firstIssueDate: `${start}-01`, firstDueDate: `${start}-10`,
+      message: 'Contrato cadastrado. A primeira mensalidade sera gerada no dia 1 indicado e vencera no dia 10.' };
+  }
+
   async cancel(tenantId: string, actorId: string, dto: CancelSubscriptionDto) {
     return this.cancelVerified(tenantId, actorId, dto, false);
   }
@@ -98,6 +120,7 @@ export class BillingService {
       const sub = await tx.subscription.findUnique({ where: { tenantId } });
       if (!sub) throw new NotFoundException('Empresa sem assinatura para encerrar.');
       await tx.tenant.update({ where: { id: tenantId }, data: { status: 'SUSPENDED' } });
+      await tx.billingCycle.updateMany({ where: { subscriptionId: sub.id, state: 'READY' }, data: { state: 'CANCELLED' } });
       await tx.campaign.updateMany({ where: { tenantId, state: { not: 'CANCELLED' } }, data: { state: 'CANCELLED' } });
       await tx.campaignDelivery.updateMany({
         where: { campaign: { tenantId }, status: 'QUEUED' },
@@ -113,7 +136,7 @@ export class BillingService {
     if (subscription.cancellationPending) {
       try {
         // Setting INACTIVE repeatedly is safe and preserves existing receivables.
-        await this.asaas.stopRecurrence(subscription.asaasSubscriptionId);
+        if (subscription.asaasSubscriptionId) await this.asaas.stopRecurrence(subscription.asaasSubscriptionId);
       } catch {
         throw new ServiceUnavailableException({
           statusCode: 503, code: 'CANCELLATION_PENDING',
@@ -153,6 +176,7 @@ export class BillingService {
     return {
       tenantStatus: tenant.status,
       plan: { name: tenant.plan.name, priceCents: tenant.plan.priceCents },
+      calendar: subscription?.calendarEnabled ? { issueDay: 1, dueDay: 10, timezone: 'America/Sao_Paulo', firstMonth: subscription.billingStartMonth, contractedPriceCents: subscription.billingPriceCents, error: subscription.calendarError } : null,
       subscription: subscription
         ? { status: subscription.status, createdAt: subscription.createdAt, canceledAt: subscription.canceledAt, cancellationPending: subscription.cancellationPending }
         : null,
@@ -166,6 +190,9 @@ export class BillingService {
    */
   async handlePaymentEvent(event: string, payload: any) {
     const asaasSubscriptionId = payload?.payment?.subscription;
+    if (!asaasSubscriptionId && typeof payload?.payment?.id === 'string' && this.calendar && ['PAYMENT_CONFIRMED','PAYMENT_RECEIVED','PAYMENT_OVERDUE','PAYMENT_UPDATED','PAYMENT_DELETED','PAYMENT_REFUNDED'].includes(event)) {
+      return this.calendar.reconcilePayment(payload.payment.id);
+    }
     if (!asaasSubscriptionId) {
       this.logger.debug(`Evento Asaas sem subscription vinculada: ${event}`);
       return { ok: true };
@@ -176,6 +203,11 @@ export class BillingService {
     });
     if (!subscription) {
       this.logger.warn(`Nenhuma assinatura local encontrada para ${asaasSubscriptionId}`);
+      return { ok: true };
+    }
+
+    if (subscription.calendarEnabled && this.calendar) {
+      await this.calendar.reconcileStatus(subscription.id);
       return { ok: true };
     }
 

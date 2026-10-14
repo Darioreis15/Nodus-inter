@@ -341,3 +341,7 @@ A coexistência da Meta permanece uma integração futura condicionada ao onboar
 ## Encerramento de contrato
 
 ADMIN pode encerrar a própria assinatura via `POST /billing/cancel`, com senha atual e confirmação `CANCEL`. O acesso é suspenso, a recorrência Asaas fica INACTIVE e o histórico/cobranças existentes são preservados. Consulte [o procedimento e a migration](docs/ENCERRAMENTO-CONTRATO.md).
+
+## Calendário de cobrança
+
+Geração dia 1 e vencimento dia 10: consulte [publicação, migração e agendador](docs/CALENDARIO-COBRANCAS.md). Ativação global explícita no backend; cobranças existentes são preservadas.

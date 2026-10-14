@@ -1,3 +1,4 @@
+import { BillingCalendar } from '../billing/billing-calendar';
 import { Body, Controller, Get, Injectable, Module, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards, CanActivate, ExecutionContext, ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
 import { IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 import * as bcrypt from 'bcryptjs';
@@ -42,7 +43,7 @@ export class OwnerService {
     const rows = await this.prisma.tenant.findMany({ where, orderBy: { id: 'asc' }, take: 26,
       select: { id: true, name: true, slug: true, status: true, createdAt: true,
         plan: { select: { id: true, name: true, priceCents: true, maxChannels: true, maxUsers: true } },
-        subscription: { select: { status: true, cancellationPending: true, canceledAt: true } },
+        subscription: { select: { status: true, cancellationPending: true, canceledAt: true, calendarEnabled: true, billingStartMonth: true, billingPriceCents: true, calendarError: true, billingCycles: { where: { error: { not: null } }, select: { month: true, error: true }, take: 5 } } },
         _count: { select: { users: true, channels: true } } } });
     return { data: rows.slice(0, 25), nextCursor: rows.length > 25 ? rows[24].id : null };
   }
@@ -71,7 +72,7 @@ export class OwnerService {
 @Controller('owner')
 @UseGuards(JwtAuthGuard, OwnerGuard)
 export class OwnerController {
-  constructor(private service: OwnerService, private prisma: PrismaService, private billing: BillingService) {}
+  constructor(private service: OwnerService, private prisma: PrismaService, private billing: BillingService, private calendar: BillingCalendar) {}
   @Get('me') @AllowSuspendedTenant()
   me(@CurrentUser() user: AuthenticatedUser) { return { email: user.email, access: 'PLATFORM_OWNER' }; }
   @Get('summary') @AllowSuspendedTenant()
@@ -82,6 +83,15 @@ export class OwnerController {
       this.prisma.subscription.count({ where: { cancellationPending: true } }),
     ]);
     return { total, active, suspended, pendingCancellation };
+  }
+  @Get('billing-calendar') @AllowSuspendedTenant()
+  async calendarStatus() {
+    const [enabledContracts, migrationPending, emissionPending] = await Promise.all([
+      this.prisma.subscription.count({ where: { calendarEnabled: true, status: { not: 'CANCELED' } } }),
+      this.prisma.subscription.count({ where: { calendarEnabled: false, status: 'ACTIVE', tenant: { status: 'ACTIVE' } } }),
+      this.prisma.billingCycle.count({ where: { state: 'SENDING' } }),
+    ]);
+    return { enabled: process.env.BILLING_CALENDAR_ENABLED === 'true', issueDay: 1, dueDay: 10, timezone: 'America/Sao_Paulo', enabledContracts, migrationPending, emissionPending };
   }
   @Get('plans') @AllowSuspendedTenant()
   plans() { return this.prisma.plan.findMany({ select: { id: true, name: true, priceCents: true, maxUsers: true, maxChannels: true }, orderBy: { priceCents: 'asc' } }); }
