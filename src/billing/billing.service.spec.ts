@@ -12,6 +12,7 @@ describe('BillingService', () => {
       subscription: { findUnique: jest.fn(), create: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
       tenant: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
     };
+    prisma.billingCycle = { updateMany: jest.fn() };
     prisma.user = { findFirst: jest.fn() };
     prisma.campaign = { updateMany: jest.fn() };
     prisma.campaignDelivery = { updateMany: jest.fn() };

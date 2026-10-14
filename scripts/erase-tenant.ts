@@ -13,7 +13,7 @@ async function main() {
   }
   // Suspender primeiro evita novas operacoes de usuario. Pausar entrada no provedor antes do job.
   await prisma.tenant.update({ where: { id }, data: { status: 'SUSPENDED' } });
-  if (tenant.subscription) await new AsaasClient().cancelSubscription(tenant.subscription.asaasSubscriptionId);
+  if (tenant.subscription?.asaasSubscriptionId) await new AsaasClient().cancelSubscription(tenant.subscription.asaasSubscriptionId);
   for (const channel of tenant.channels) {
     if (channel.type === 'QR_EVOLUTION') await new EvolutionConnector().deleteInstance((channel.config as any).instanceName);
   }

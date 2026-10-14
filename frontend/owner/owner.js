@@ -29,13 +29,15 @@ async function load(append) {
   if(busy)return; busy=true; $('notice').textContent='Carregando empresas…'; $('more').disabled=true;
   try {
     const query=new URLSearchParams(); if($('search').value.trim())query.set('search',$('search').value.trim());if($('status').value)query.set('status',$('status').value);if(append&&cursor)query.set('cursor',cursor);
-    const [result,summary]=await Promise.all([api('/owner/tenants?'+query),api('/owner/summary')]);
+    const [result,summary,calendar]=await Promise.all([api('/owner/tenants?'+query),api('/owner/summary'),api('/owner/billing-calendar')]);
+    $('calendarStatus').textContent = `${calendar.enabled ? "Ativado" : "Aguardando ativação no servidor"} · ${calendar.enabledContracts} contratos no calendário · ${calendar.migrationPending} aguardando migração · ${calendar.emissionPending} emissões para conciliar`;
     $('metrics').replaceChildren();for(const [key,title] of Object.entries({total:'Empresas cadastradas',active:'Empresas ativas',suspended:'Empresas suspensas',pendingCancellation:'Cancelamentos pendentes'})){const box=document.createElement('div');box.className='metric';box.textContent=title;const n=document.createElement('strong');n.textContent=summary[key];box.append(n);$('metrics').append(box);}
     if(!append)$('companies').replaceChildren();
     for(const company of result.data){const row=document.createElement('tr'); const name=cell(row,company.name);const sub=document.createElement('small');sub.textContent=company.slug+' · '+labels[company.status];name.append(sub);
       const plan=cell(row,company.plan.name);const price=document.createElement('small');price.textContent=money(company.plan.priceCents)+' / mês no catálogo';plan.append(price);
       cell(row,`${company._count.channels}/${company.plan.maxChannels} canais · ${company._count.users}/${company.plan.maxUsers} usuários`);
       cell(row,company.subscription?.cancellationPending?'Cancelamento pendente':labels[company.subscription?.status]||'Sem assinatura');const actions=cell(row,'');
+      if(company.subscription){const note=document.createElement('small');const sub=company.subscription;note.textContent=sub.calendarError||sub.billingCycles?.length?'Cobrança requer revisão':sub.calendarEnabled?`Calendário a partir de ${sub.billingStartMonth} · contratado ${money(sub.billingPriceCents)}`:'Calendário anterior';actions.append(note);}
       const edit=document.createElement('button');edit.textContent='Trocar plano';edit.disabled=company.subscription?.status==='CANCELED';edit.onclick=()=>openAction(company,'plan');actions.append(edit);
       if(company.subscription&&(company.subscription.status!=='CANCELED'||company.subscription.cancellationPending)){const cancel=document.createElement('button');cancel.textContent=company.subscription.cancellationPending?'Repetir cancelamento':'Encerrar contrato';cancel.onclick=()=>openAction(company,'cancel');actions.append(cancel);}
       $('companies').append(row);

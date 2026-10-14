@@ -238,12 +238,18 @@ model WebhookSubscription {
 }
 
 model Subscription {
+  billingOptions Json @default("{}") @map("billing_options")
+  calendarEnabled Boolean @default(false) @map("calendar_enabled")
+  billingPriceCents Int? @map("billing_price_cents")
+  billingStartMonth String? @map("billing_start_month")
+  calendarError String? @map("calendar_error")
+  billingCycles BillingCycle[]
   cancellationPending Boolean @default(false) @map("cancellation_pending")
   canceledAt DateTime? @map("canceled_at")
   id                  String             @id @default(uuid())
   tenantId            String             @unique @map("tenant_id") // um tenant tem no maximo uma assinatura
   asaasCustomerId     String             @map("asaas_customer_id")
-  asaasSubscriptionId String             @unique @map("asaas_subscription_id")
+  asaasSubscriptionId String?            @unique @map("asaas_subscription_id")
   status              SubscriptionStatus @default(PENDING)
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
@@ -329,4 +335,20 @@ model CampaignSuppression {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   @@id([tenantId, phoneHash])
   @@map("campaign_suppressions")
+}
+
+model BillingCycle {
+  id String @id @default(uuid())
+  subscriptionId String @map("subscription_id")
+  month String
+  dueDate String @map("due_date")
+  valueCents Int @map("value_cents")
+  state String @default("READY")
+  paymentId String? @unique @map("payment_id")
+  attemptedAt DateTime? @map("attempted_at")
+  error String?
+  createdAt DateTime @default(now()) @map("created_at")
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  @@unique([subscriptionId, month])
+  @@map("billing_cycles")
 }
