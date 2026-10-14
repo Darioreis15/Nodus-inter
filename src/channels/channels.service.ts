@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { validateMetaToken, metaRequest } from './connectors/meta-api';
 import { seal, unseal } from '../security/secrets';
 import { ForbiddenException, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
@@ -48,7 +49,7 @@ export class ChannelsService {
 
     if (dto.type === ChannelTypeDto.OFFICIAL_META) {
       await validateMetaToken(dto.phoneNumberId!, dto.accessToken!);
-      return this.prisma.channel.create({
+      return this.reserveChannel(tenantId, {
         select: { id: true, name: true, type: true, status: true },
         data: {
           tenantId,
@@ -68,7 +69,7 @@ export class ChannelsService {
     // QR_EVOLUTION: cria o registro primeiro pra ter um id, so entao registra
     // a instancia na Evolution API usando esse id no nome e na URL do webhook.
     const instanceName = `nodus-${crypto.randomUUID()}`;
-    const channel = await this.prisma.channel.create({
+    const channel = await this.reserveChannel(tenantId, {
       data: {
         tenantId,
         type: 'QR_EVOLUTION',
@@ -85,6 +86,19 @@ export class ChannelsService {
     );
 
     return channel;
+  }
+
+  // Serialize capacity checks with owner plan changes and concurrent channel creation.
+  private async reserveChannel(tenantId: string, args: Prisma.ChannelCreateArgs) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
+      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId },
+        include: { plan: true, _count: { select: { channels: true } } } });
+      if (tenant.status !== 'ACTIVE' || tenant._count.channels >= tenant.plan.maxChannels) {
+        throw new ForbiddenException('Empresa suspensa ou limite de canais atingido.');
+      }
+      return tx.channel.create(args);
+    });
   }
 
   async findOwnedChannel(tenantId: string, channelId: string): Promise<Channel> {

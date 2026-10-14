@@ -1,3 +1,4 @@
+import { assertPlatformOwner } from '../owner/owner-access';
 import * as bcrypt from 'bcryptjs';
 import { CancelSubscriptionDto } from './dto/cancel-subscription.dto';
 import { BadRequestException, ForbiddenException, NotFoundException, ServiceUnavailableException, ConflictException, UnprocessableEntityException, Injectable, Logger } from '@nestjs/common';
@@ -71,15 +72,25 @@ export class BillingService {
   }
 
   async cancel(tenantId: string, actorId: string, dto: CancelSubscriptionDto) {
+    return this.cancelVerified(tenantId, actorId, dto, false);
+  }
+
+  async cancelAsOwner(tenantId: string, actorId: string, dto: CancelSubscriptionDto) {
+    return this.cancelVerified(tenantId, actorId, dto, true);
+  }
+
+  private async cancelVerified(tenantId: string, actorId: string, dto: CancelSubscriptionDto, platformOwner: boolean) {
     if (dto.confirmation !== 'CANCEL') throw new BadRequestException('Confirme com CANCEL.');
-    const actor = await this.prisma.user.findFirst({ where: { id: actorId, tenantId } });
+    const actor = await this.prisma.user.findFirst({ where: { id: actorId, ...(platformOwner ? {} : { tenantId }) } });
+    if (platformOwner) assertPlatformOwner(actor || undefined);
     if (!actor || actor.role !== 'ADMIN' || !await bcrypt.compare(dto.currentPassword, actor.passwordHash)) {
       throw new ForbiddenException('Confirmacao de identidade invalida.');
     }
     // Persist the intent BEFORE the remote call. Timeouts cannot reopen local access.
     const subscription = await this.prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
-      const currentActor = await tx.user.findFirst({ where: { id: actorId, tenantId } });
+      const currentActor = await tx.user.findFirst({ where: { id: actorId, ...(platformOwner ? {} : { tenantId }) } });
+      if (platformOwner) assertPlatformOwner(currentActor || undefined);
       if (!currentActor || currentActor.role !== 'ADMIN' || currentActor.passwordHash !== actor.passwordHash) {
         throw new ForbiddenException('Credenciais alteradas. Entre novamente.');
       }
