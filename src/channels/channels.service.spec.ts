@@ -16,6 +16,8 @@ describe('ChannelsService', () => {
       tenant: { findUniqueOrThrow: jest.fn() },
       channel: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn() },
     };
+    prisma.$queryRaw = jest.fn();
+    prisma.$transaction = jest.fn((fn: any) => fn(prisma));
     evolutionConnector = {
       createInstance: jest.fn(),
       getQrCode: jest.fn(),
@@ -28,7 +30,7 @@ describe('ChannelsService', () => {
   describe('createForTenant', () => {
     it('bloqueia criacao quando o plano atingiu o limite de canais', async () => {
       prisma.tenant.findUniqueOrThrow.mockResolvedValue({
-        id: 'tenant-1',
+        id: 'tenant-1', status: 'ACTIVE',
         plan: { name: 'Starter', maxChannels: 1 },
         _count: { channels: 1 },
       });
@@ -45,7 +47,7 @@ describe('ChannelsService', () => {
 
     it('cria canal oficial da Meta ja como CONNECTED, sem chamar a Evolution API', async () => {
       prisma.tenant.findUniqueOrThrow.mockResolvedValue({
-        id: 'tenant-1',
+        id: 'tenant-1', status: 'ACTIVE',
         plan: { name: 'Pro', maxChannels: 5 },
         _count: { channels: 0 },
       });
@@ -68,7 +70,7 @@ describe('ChannelsService', () => {
 
     it('cria instancia na Evolution API para canal QR_EVOLUTION, com webhook apontando pro channel id', async () => {
       prisma.tenant.findUniqueOrThrow.mockResolvedValue({
-        id: 'tenant-1',
+        id: 'tenant-1', status: 'ACTIVE',
         plan: { name: 'Pro', maxChannels: 5 },
         _count: { channels: 0 },
       });
@@ -84,6 +86,16 @@ describe('ChannelsService', () => {
         'https://app.exemplo.com/webhooks/evolution/channel-2',
       );
     });
+  });
+
+  it('rechecks capacity under lock after a concurrent downgrade', async () => {
+    prisma.tenant.findUniqueOrThrow
+      .mockResolvedValueOnce({ id: 'tenant-1', status: 'ACTIVE', plan: { maxChannels: 5 }, _count: { channels: 1 } })
+      .mockResolvedValueOnce({ id: 'tenant-1', status: 'ACTIVE', plan: { maxChannels: 1 }, _count: { channels: 1 } });
+    await expect(service.createForTenant('tenant-1', 'https://app.example.com', { name: 'New', type: ChannelTypeDto.QR_EVOLUTION })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.$queryRaw).toHaveBeenCalled();
+    expect(prisma.channel.create).not.toHaveBeenCalled();
+    expect(evolutionConnector.createInstance).not.toHaveBeenCalled();
   });
 
   describe('findOwnedChannel', () => {
