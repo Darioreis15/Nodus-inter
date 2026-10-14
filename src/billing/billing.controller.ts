@@ -1,3 +1,4 @@
+import { CancelSubscriptionDto } from './dto/cancel-subscription.dto';
 import { BadRequestException, Query, Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -23,6 +24,14 @@ export class BillingController {
     const offset = Number(raw);
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100000) throw new BadRequestException('Paginacao invalida.');
     return this.billingService.payments(user.tenantId, offset);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  @AllowSuspendedTenant()
+  @Post('cancel')
+  cancel(@CurrentUser() user: AuthenticatedUser, @Body() dto: CancelSubscriptionDto) {
+    return this.billingService.cancel(user.tenantId, user.userId, dto);
   }
 
   @UseGuards(RolesGuard)

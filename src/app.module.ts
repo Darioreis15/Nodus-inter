@@ -1,3 +1,4 @@
+import { OwnerModule } from './owner/owner.controller';
 import { CampaignsModule } from './campaigns/campaigns.controller';
 import { WorkspaceModule } from './workspace/workspace.controller';
 import { PrivacyModule } from './privacy/privacy.controller';
@@ -19,6 +20,7 @@ import { BillingModule } from './billing/billing.module';
 
 @Module({
   imports: [
+    OwnerModule,
     PrismaModule,
     CampaignsModule,
     WorkspaceModule,

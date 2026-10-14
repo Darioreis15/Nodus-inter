@@ -337,3 +337,7 @@ O cadastro mais antigo existente de cada empresa passa a ser o administrador pri
 Campanhas e follow-ups persistem no PostgreSQL, com endpoints de sessão e `/public/v1/campaigns` para integrações por chave. A API pública também permite iniciar conversas e enviar templates. Consulte [o guia completo](docs/GUIA-AUTOMACOES-CAMPANHAS.md) para publicação, variáveis, exemplos de boleto, idempotência e validação. O processamento requer `CAMPAIGNS_WORKER_ENABLED=true` e processo continuamente ativo para pontualidade. Por padrão a fila não despacha.
 
 A coexistência da Meta permanece uma integração futura condicionada ao onboarding oficial; veja [viabilidade e roteiro de testes](docs/COEXISTENCIA-META.md).
+
+## Encerramento de contrato
+
+ADMIN pode encerrar a própria assinatura via `POST /billing/cancel`, com senha atual e confirmação `CANCEL`. O acesso é suspenso, a recorrência Asaas fica INACTIVE e o histórico/cobranças existentes são preservados. Consulte [o procedimento e a migration](docs/ENCERRAMENTO-CONTRATO.md).
