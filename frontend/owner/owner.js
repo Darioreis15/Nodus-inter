@@ -40,6 +40,7 @@ async function load(append) {
       if(company.subscription){const note=document.createElement('small');const sub=company.subscription;note.textContent=sub.calendarError||sub.billingCycles?.length?'Cobrança requer revisão':sub.calendarEnabled?`Calendário a partir de ${sub.billingStartMonth} · contratado ${money(sub.billingPriceCents)}`:'Calendário anterior';actions.append(note);}
       const edit=document.createElement('button');edit.textContent='Trocar plano';edit.disabled=company.subscription?.status==='CANCELED';edit.onclick=()=>openAction(company,'plan');actions.append(edit);
       if(company.subscription&&(company.subscription.status!=='CANCELED'||company.subscription.cancellationPending)){const cancel=document.createElement('button');cancel.textContent=company.subscription.cancellationPending?'Repetir cancelamento':'Encerrar contrato';cancel.onclick=()=>openAction(company,'cancel');actions.append(cancel);}
+      if(company.subscription && (company.subscription.status!=='ACTIVE'||company.status!=='ACTIVE')){const activate=document.createElement('button');activate.textContent='Ativar contrato';activate.disabled=!!company.subscription.cancellationPending;activate.title=activate.disabled?'Conclua o cancelamento pendente primeiro':'';activate.onclick=()=>openAction(company,'activate');actions.append(activate);}
       $('companies').append(row);
     }
     cursor=result.nextCursor;$('more').hidden=!cursor;$('empty').hidden=!!$('companies').children.length;$('notice').textContent='';
@@ -48,10 +49,15 @@ async function load(append) {
 $('filters').onsubmit=event=>{event.preventDefault();load(false);};$('more').onclick=()=>load(true);
 function openAction(company,type){selection={company,type};$('companyName').textContent=company.name;$('actionLabel').textContent=type==='plan'?'ALTERAR PLANO DE ACESSO':'ENCERRAR CONTRATO';$('planLabel').hidden=type!=='plan';$('plan').replaceChildren();for(const p of plans){const option=document.createElement('option');option.value=p.id;option.textContent=`${p.name} · ${p.maxChannels} canais · ${p.maxUsers} usuários · catálogo ${money(p.priceCents)}`;option.selected=p.id===company.plan.id;$('plan').append(option);}
   $('impact').textContent=type==='plan'?'Os limites de acesso serão atualizados imediatamente. O valor da recorrência e as cobranças existentes no Asaas NÃO serão alterados. Se ainda não houver assinatura, uma nova assinatura usará o preço do plano vigente.':'O acesso operacional será suspenso e os envios agendados serão cancelados. A recorrência será interrompida no Asaas; cobranças existentes e histórico serão preservados. Não há estorno automático.';
-  $('ackText').textContent=type==='plan'?'Entendo que esta alteração não reajusta a assinatura existente.':'Confirmo o encerramento imediato desta empresa.';$('confirmPassword').value='';$('ack').checked=false;$('actionError').textContent='';$('confirm').disabled=false;$('action').showModal();
+  $('ackText').textContent=type==='plan'?'Entendo que esta alteração não reajusta a assinatura existente.':'Confirmo o encerramento imediato desta empresa.';if(type==='activate'){
+    $('actionLabel').textContent='ATIVAR CONTRATO';
+    $('impact').textContent='O acesso será liberado e a cobrança mensal retomada no calendário dia 1 / dia 10, preservando mensalidades existentes. Não haverá cobrança imediata. Mensalidades vencidas ou emissões incertas precisam ser regularizadas antes. Campanhas canceladas não serão retomadas.';
+    $('ackText').textContent='Confirmo a ativação do acesso e a retomada das próximas mensalidades.';
+  }
+  $('confirmPassword').value='';$('ack').checked=false;$('actionError').textContent='';$('confirm').disabled=false;$('action').showModal();
 }
 $('close').onclick=()=>{$('action').close();$('confirmPassword').value='';};
 $('actionForm').onsubmit=async event=>{event.preventDefault();if(!selection)return;const {company,type}=selection;$('confirm').disabled=true;$('close').disabled=true;const currentPassword=$('confirmPassword').value;
-  try{await api(`/owner/tenants/${encodeURIComponent(company.id)}/${type}`,{method:type==='plan'?'PATCH':'POST',body:JSON.stringify(type==='plan'?{planId:$('plan').value,expectedPlanId:company.plan.id,currentPassword,confirmation:'ACCESS_ONLY'}:{currentPassword,confirmation:'CANCEL'})});$('action').close();await load(false);$('notice').textContent=type==='plan'?'Plano de acesso atualizado. Cobrança existente mantida.':'Contrato encerrado.';}
+  try{await api(`/owner/tenants/${encodeURIComponent(company.id)}/${type}`,{method:type==='plan'?'PATCH':'POST',body:JSON.stringify(type==='plan'?{planId:$('plan').value,expectedPlanId:company.plan.id,currentPassword,confirmation:'ACCESS_ONLY'}:{currentPassword,confirmation:type==='activate'?'ACTIVATE':'CANCEL'})});$('action').close();await load(false);$('notice').textContent=type==='plan'?'Plano de acesso atualizado. Cobrança existente mantida.':type==='activate'?'Contrato ativado. Calendário mensal retomado.':'Contrato encerrado.';}
   catch(error){$('actionError').textContent=error.message;}finally{$('confirmPassword').value='';$('confirm').disabled=false;$('close').disabled=false;}
 };

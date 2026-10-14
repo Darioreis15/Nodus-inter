@@ -17,7 +17,7 @@ describe('Platform owner authorization', () => {
   it('all owner handlers require JWT and owner guards, with suspended access exceptions', () => {
     const guards=Reflect.getMetadata('__guards__',OwnerController);
     expect(guards.map((g:any)=>g.name)).toEqual(['JwtAuthGuard','OwnerGuard']);
-    for (const name of (['me','summary','plans','list','plan','cancel','calendarStatus'] as const)) expect(Reflect.getMetadata('allowSuspendedTenant',OwnerController.prototype[name])).toBe(true);
+    for (const name of (['me','summary','plans','list','plan','cancel','calendarStatus','activate'] as const)) expect(Reflect.getMetadata('allowSuspendedTenant',OwnerController.prototype[name])).toBe(true);
   });
   it('cross-tenant cancellation rejects an ordinary company admin before any mutation', async () => {
     const prisma:any={user:{findFirst:jest.fn().mockResolvedValue({id:'not-owner',role:'ADMIN'})},$transaction:jest.fn()};
