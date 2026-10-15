@@ -1,3 +1,4 @@
+import { ActivateContractDto, BillingActivation } from '../billing/billing-activation';
 import { BillingCalendar } from '../billing/billing-calendar';
 import { Body, Controller, Get, Injectable, Module, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards, CanActivate, ExecutionContext, ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
 import { IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
@@ -72,7 +73,7 @@ export class OwnerService {
 @Controller('owner')
 @UseGuards(JwtAuthGuard, OwnerGuard)
 export class OwnerController {
-  constructor(private service: OwnerService, private prisma: PrismaService, private billing: BillingService, private calendar: BillingCalendar) {}
+  constructor(private service: OwnerService, private prisma: PrismaService, private billing: BillingService, private calendar: BillingCalendar, private activation: BillingActivation) {}
   @Get('me') @AllowSuspendedTenant()
   me(@CurrentUser() user: AuthenticatedUser) { return { email: user.email, access: 'PLATFORM_OWNER' }; }
   @Get('summary') @AllowSuspendedTenant()
@@ -99,6 +100,8 @@ export class OwnerController {
   list(@Query() query: CompanyQuery) { return this.service.list(query); }
   @Patch('tenants/:id/plan') @AllowSuspendedTenant()
   plan(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: PlanChange) { return this.service.changePlan(id, user.userId, dto); }
+  @Post('tenants/:id/activate') @AllowSuspendedTenant()
+  activate(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: ActivateContractDto) { return this.activation.activate(id, user.userId, dto); }
   @Post('tenants/:id/cancel') @AllowSuspendedTenant()
   cancel(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: CancelSubscriptionDto) { return this.billing.cancelAsOwner(id, user.userId, dto); }
 }
