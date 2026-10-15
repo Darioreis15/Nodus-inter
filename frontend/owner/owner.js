@@ -2,7 +2,7 @@
 // Public backend URL only. Never place secrets or the owner's ID here.
 const API = 'https://nodus-inter.onrender.com';
 const $ = id => document.getElementById(id);
-let token = '', plans = [], cursor = null, selection = null, busy = false, openingContract = false;
+let token = '', plans = [], cursor = null, selection = null, busy = false, openingContract = false, creatingCompany = false, createdCompany = null;
 const money = cents => new Intl.NumberFormat('pt-BR', {style:'currency',currency:'BRL'}).format(cents/100);
 const labels = {ACTIVE:'Ativo',SUSPENDED:'Suspenso',PENDING:'Pendente',OVERDUE:'Em atraso',CANCELED:'Encerrado'};
 async function api(path, options = {}) {
@@ -14,7 +14,7 @@ async function api(path, options = {}) {
   }
   return data;
 }
-function signOut() { token=''; selection=null; $('dashboard').hidden=true; $('loginPanel').hidden=false; $('logout').hidden=true; $('companies').replaceChildren(); $('action').close(); $('confirmPassword').value=''; }
+function signOut() { clearCompanyResult();$('companyDialog').close();$('companyForm').reset();token=''; selection=null; $('dashboard').hidden=true; $('loginPanel').hidden=false; $('logout').hidden=true; $('companies').replaceChildren(); $('action').close(); $('confirmPassword').value=''; }
 $('logout').onclick=signOut;
 $('login').onsubmit=async event=>{
   event.preventDefault(); const button=event.submitter; button.disabled=true; $('notice').textContent='Entrando…';
@@ -86,4 +86,36 @@ $('actionForm').onsubmit=async event=>{event.preventDefault();if(!selection)retu
     $('notice').textContent=type==='contract'?`Contrato criado e acesso liberado. Primeira emissão: ${result.firstIssueDate.split('-').reverse().join('/')}; vencimento: ${result.firstDueDate.split('-').reverse().join('/')}.`:type==='plan'?'Plano de acesso atualizado. Cobrança existente mantida.':type==='activate'?'Contrato ativado. Calendário mensal retomado.':'Contrato encerrado.';
   }
   catch(error){$('actionError').textContent=error.message;}finally{$('confirmPassword').value='';$('confirm').disabled=false;$('close').disabled=false;}
+};
+
+function clearCompanyResult(){
+  createdCompany=null;$('createdCompanyPassword').value='';$('createdCompanyPassword').type='password';
+  $('createdCompanyName').textContent='';$('createdCompanyEmail').textContent='';$('companyInvitationStatus').textContent='';
+  $('revealCompanyPassword').textContent='Mostrar senha';$('copyCompanyPassword').textContent='Copiar senha';$('companyResult').close();
+}
+$('newCompany').onclick=()=>{
+  if(creatingCompany)return;
+  $('companyForm').reset();$('companyError').textContent='';$('newCompanyPlan').replaceChildren();
+  for(const p of plans){const option=document.createElement('option');option.value=p.id;option.textContent=`${p.name} · ${money(p.priceCents)}/mês · ${p.maxChannels} canais · ${p.maxUsers} usuários`;option.disabled=p.maxUsers<1;$('newCompanyPlan').append(option);}
+  $('companyDialog').showModal();$('newCompanyName').focus();
+};
+$('closeCompany').onclick=()=>{if(!creatingCompany){$('companyDialog').close();$('companyForm').reset();}};
+$('companyDialog').addEventListener('cancel',event=>{if(creatingCompany)event.preventDefault();else $('companyForm').reset();});
+$('companyResult').addEventListener('cancel',event=>{event.preventDefault();clearCompanyResult();});
+$('closeCompanyResult').onclick=clearCompanyResult;
+$('revealCompanyPassword').onclick=()=>{const show=$('createdCompanyPassword').type==='password';$('createdCompanyPassword').type=show?'text':'password';$('revealCompanyPassword').textContent=show?'Ocultar senha':'Mostrar senha';};
+$('copyCompanyPassword').onclick=async()=>{try{await navigator.clipboard.writeText($('createdCompanyPassword').value);$('copyCompanyPassword').textContent='Copiada';}catch{$('copyCompanyPassword').textContent='Selecione e copie o campo';$('createdCompanyPassword').focus();$('createdCompanyPassword').select();}};
+$('createCompanyContract').onclick=()=>{const company=createdCompany;clearCompanyResult();if(company)openContract(company,$('newCompany'));};
+$('companyForm').onsubmit=async event=>{
+  event.preventDefault();if(creatingCompany)return;creatingCompany=true;$('saveCompany').disabled=true;$('closeCompany').disabled=true;$('companyError').textContent='';
+  try{
+    const temporaryPassword=$('newAdminPassword').value;
+    if(temporaryPassword && new TextEncoder().encode(temporaryPassword).length>72)throw new Error('A senha temporária deve ter no máximo 72 bytes.');
+    const data=await api('/owner/tenants',{method:'POST',body:JSON.stringify({companyName:$('newCompanyName').value.trim(),adminName:$('newAdminName').value.trim(),adminEmail:$('newAdminEmail').value.trim().toLowerCase(),planId:$('newCompanyPlan').value,...(temporaryPassword?{temporaryPassword}:{}),sendInvitation:$('sendCompanyInvitation').checked,currentPassword:$('companyOwnerPassword').value,confirmation:'CREATE_COMPANY'})});
+    $('companyDialog').close();$('companyForm').reset();
+    createdCompany=data.tenant;$('createdCompanyName').textContent=data.tenant.name;$('createdCompanyEmail').textContent='Administrador: '+data.user.email;$('createdCompanyPassword').value=data.temporaryPassword;
+    const messages={accepted:'O provedor de e-mail aceitou o convite. Peça ao administrador para conferir a caixa de entrada e o spam.',failed:'Empresa criada, mas o envio do convite falhou. Repasse a senha temporária por um canal privado ou use a recuperação de senha.',not_configured:'Empresa criada. O envio de e-mail não está configurado; repasse o acesso por um canal privado.',not_requested:'Convite por e-mail não solicitado. Repasse o acesso por um canal privado.'};
+    $('companyInvitationStatus').textContent=messages[data.invitationEmailStatus]||'Confira o envio do convite.';
+    $('companyResult').showModal();$('search').value=data.tenant.slug;$('status').value='';await load(false);
+  }catch(error){$('companyError').textContent=error.message;}finally{creatingCompany=false;$('saveCompany').disabled=false;$('closeCompany').disabled=false;$('companyOwnerPassword').value='';$('newAdminPassword').value='';}
 };

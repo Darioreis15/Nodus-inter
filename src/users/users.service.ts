@@ -124,7 +124,7 @@ export class UsersService {
     });
   }
 
-  private async sendInvitation(user: { name: string; email: string }, password: string): Promise<'accepted' | 'failed' | 'not_configured'> {
+  async sendInvitation(user: { name: string; email: string }, password: string): Promise<'accepted' | 'failed' | 'not_configured'> {
     const apiKey = process.env.RESEND_API_KEY;
     const from = process.env.MAIL_FROM;
     const origin = process.env.FRONTEND_URL;
