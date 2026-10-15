@@ -2,7 +2,7 @@
 // Public backend URL only. Never place secrets or the owner's ID here.
 const API = 'https://nodus-inter.onrender.com';
 const $ = id => document.getElementById(id);
-let token = '', plans = [], cursor = null, selection = null, busy = false;
+let token = '', plans = [], cursor = null, selection = null, busy = false, openingContract = false;
 const money = cents => new Intl.NumberFormat('pt-BR', {style:'currency',currency:'BRL'}).format(cents/100);
 const labels = {ACTIVE:'Ativo',SUSPENDED:'Suspenso',PENDING:'Pendente',OVERDUE:'Em atraso',CANCELED:'Encerrado'};
 async function api(path, options = {}) {
@@ -41,13 +41,14 @@ async function load(append) {
       const edit=document.createElement('button');edit.textContent='Trocar plano';edit.disabled=company.subscription?.status==='CANCELED';edit.onclick=()=>openAction(company,'plan');actions.append(edit);
       if(company.subscription&&(company.subscription.status!=='CANCELED'||company.subscription.cancellationPending)){const cancel=document.createElement('button');cancel.textContent=company.subscription.cancellationPending?'Repetir cancelamento':'Encerrar contrato';cancel.onclick=()=>openAction(company,'cancel');actions.append(cancel);}
       if(company.subscription && (company.subscription.status!=='ACTIVE'||company.status!=='ACTIVE')){const activate=document.createElement('button');activate.textContent='Ativar contrato';activate.disabled=!!company.subscription.cancellationPending;activate.title=activate.disabled?'Conclua o cancelamento pendente primeiro':'';activate.onclick=()=>openAction(company,'activate');actions.append(activate);}
+      if(!company.subscription){const create=document.createElement('button');create.textContent='Criar contrato';create.onclick=()=>openContract(company,create);actions.append(create);}
       $('companies').append(row);
     }
     cursor=result.nextCursor;$('more').hidden=!cursor;$('empty').hidden=!!$('companies').children.length;$('notice').textContent='';
   }catch(error){$('notice').textContent=error.message;}finally{busy=false;$('more').disabled=false;}
 }
 $('filters').onsubmit=event=>{event.preventDefault();load(false);};$('more').onclick=()=>load(true);
-function openAction(company,type){selection={company,type};$('companyName').textContent=company.name;$('actionLabel').textContent=type==='plan'?'ALTERAR PLANO DE ACESSO':'ENCERRAR CONTRATO';$('planLabel').hidden=type!=='plan';$('plan').replaceChildren();for(const p of plans){const option=document.createElement('option');option.value=p.id;option.textContent=`${p.name} · ${p.maxChannels} canais · ${p.maxUsers} usuários · catálogo ${money(p.priceCents)}`;option.selected=p.id===company.plan.id;$('plan').append(option);}
+function openAction(company,type){$('contractFields').hidden=true;$('contractFields').disabled=true;$('billingDocument').value='';$('billingEmail').value='';selection={company,type};$('companyName').textContent=company.name;$('actionLabel').textContent=type==='plan'?'ALTERAR PLANO DE ACESSO':'ENCERRAR CONTRATO';$('planLabel').hidden=type!=='plan';$('plan').replaceChildren();for(const p of plans){const option=document.createElement('option');option.value=p.id;option.textContent=`${p.name} · ${p.maxChannels} canais · ${p.maxUsers} usuários · catálogo ${money(p.priceCents)}`;option.selected=p.id===company.plan.id;$('plan').append(option);}
   $('impact').textContent=type==='plan'?'Os limites de acesso serão atualizados imediatamente. O valor da recorrência e as cobranças existentes no Asaas NÃO serão alterados. Se ainda não houver assinatura, uma nova assinatura usará o preço do plano vigente.':'O acesso operacional será suspenso e os envios agendados serão cancelados. A recorrência será interrompida no Asaas; cobranças existentes e histórico serão preservados. Não há estorno automático.';
   $('ackText').textContent=type==='plan'?'Entendo que esta alteração não reajusta a assinatura existente.':'Confirmo o encerramento imediato desta empresa.';if(type==='activate'){
     $('actionLabel').textContent='ATIVAR CONTRATO';
@@ -56,8 +57,33 @@ function openAction(company,type){selection={company,type};$('companyName').text
   }
   $('confirmPassword').value='';$('ack').checked=false;$('actionError').textContent='';$('confirm').disabled=false;$('action').showModal();
 }
-$('close').onclick=()=>{$('action').close();$('confirmPassword').value='';};
+async function openContract(company,button){
+  if(openingContract)return;openingContract=true;button.disabled=true;$('notice').textContent='Consultando condições do contrato…';
+  try{
+    const preview=await api(`/owner/tenants/${encodeURIComponent(company.id)}/contract-preview`);
+    if(!token)return;
+    openAction(company,'contract');selection.preview=preview;
+    $('contractFields').hidden=false;$('contractFields').disabled=false;
+    $('actionLabel').textContent='CRIAR E ATIVAR CONTRATO';
+    const date=value=>value.split('-').reverse().join('/');
+    $('impact').textContent=`Plano ${preview.planName}: ${money(preview.priceCents)} por mês. Primeira emissão em ${date(preview.firstIssueDate)}, vencimento em ${date(preview.firstDueDate)}. O acesso será liberado ao confirmar, antes do primeiro pagamento. Sem cobrança proporcional do período anterior. A mensalidade será emitida pelo calendário; esta ação não recebe pagamento.`;
+    $('ackText').textContent='Confirmo os dados financeiros, o valor mensal, as datas e a liberação do acesso antes do pagamento.';
+    $('notice').textContent='';
+  }catch(error){$('notice').textContent=error.message;}finally{openingContract=false;button.disabled=false;}
+}
+$('close').onclick=()=>{$('action').close();$('confirmPassword').value='';$('billingDocument').value='';$('billingEmail').value='';};
 $('actionForm').onsubmit=async event=>{event.preventDefault();if(!selection)return;const {company,type}=selection;$('confirm').disabled=true;$('close').disabled=true;const currentPassword=$('confirmPassword').value;
-  try{await api(`/owner/tenants/${encodeURIComponent(company.id)}/${type}`,{method:type==='plan'?'PATCH':'POST',body:JSON.stringify(type==='plan'?{planId:$('plan').value,expectedPlanId:company.plan.id,currentPassword,confirmation:'ACCESS_ONLY'}:{currentPassword,confirmation:type==='activate'?'ACTIVATE':'CANCEL'})});$('action').close();await load(false);$('notice').textContent=type==='plan'?'Plano de acesso atualizado. Cobrança existente mantida.':type==='activate'?'Contrato ativado. Calendário mensal retomado.':'Contrato encerrado.';}
+  try{
+    let payload=type==='plan'?{planId:$('plan').value,expectedPlanId:company.plan.id,currentPassword,confirmation:'ACCESS_ONLY'}:{currentPassword,confirmation:type==='activate'?'ACTIVATE':'CANCEL'};
+    if(type==='contract'){
+      const cpfCnpj=$('billingDocument').value.replace(/[.\/\-\s]/g,'');
+      if(!/^(?:\d{11}|\d{14})$/.test(cpfCnpj))throw new Error('Informe um CPF de 11 dígitos ou CNPJ de 14 dígitos.');
+      const preview=selection.preview;
+      payload={currentPassword,confirmation:'CREATE_CONTRACT',cpfCnpj,email:$('billingEmail').value.trim(),expectedPlanId:preview.planId,expectedPriceCents:preview.priceCents,expectedStartMonth:preview.startMonth};
+    }
+    const result=await api(`/owner/tenants/${encodeURIComponent(company.id)}/${type}`,{method:type==='plan'?'PATCH':'POST',body:JSON.stringify(payload)});
+    $('action').close();$('billingDocument').value='';$('billingEmail').value='';await load(false);
+    $('notice').textContent=type==='contract'?`Contrato criado e acesso liberado. Primeira emissão: ${result.firstIssueDate.split('-').reverse().join('/')}; vencimento: ${result.firstDueDate.split('-').reverse().join('/')}.`:type==='plan'?'Plano de acesso atualizado. Cobrança existente mantida.':type==='activate'?'Contrato ativado. Calendário mensal retomado.':'Contrato encerrado.';
+  }
   catch(error){$('actionError').textContent=error.message;}finally{$('confirmPassword').value='';$('confirm').disabled=false;$('close').disabled=false;}
 };

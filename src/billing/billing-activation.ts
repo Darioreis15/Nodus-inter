@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { CreateOwnerContractDto } from './dto/create-owner-contract.dto';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { IsIn, IsString, MaxLength, MinLength } from 'class-validator';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,6 +15,49 @@ export class ActivateContractDto {
 @Injectable()
 export class BillingActivation {
   constructor(private prisma: PrismaService, private asaas: AsaasClient) {}
+  async previewCreation(tenantId: string, actorId: string) {
+    assertPlatformOwner(await this.prisma.user.findUnique({ where: { id: actorId } }) || undefined);
+    if (process.env.BILLING_CALENDAR_ENABLED !== 'true') throw new ConflictException('Ative o calendario mensal no servidor antes de criar contratos.');
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId }, include: { plan: true, subscription: true } });
+    if (!tenant) throw new NotFoundException('Empresa nao encontrada.');
+    if (tenant.subscription) throw new ConflictException('Empresa ja possui contrato. Atualize a lista.');
+    if (!Number.isSafeInteger(tenant.plan.priceCents) || tenant.plan.priceCents < 500) throw new ConflictException('Plano precisa de valor valido, minimo R$ 5.');
+    const start = firstCalendarMonth(saoPauloDate());
+    return { planId: tenant.planId, planName: tenant.plan.name, priceCents: tenant.plan.priceCents,
+      startMonth: start, firstIssueDate: `${start}-01`, firstDueDate: `${start}-10` };
+  }
+
+  async createContract(tenantId: string, actorId: string, dto: CreateOwnerContractDto) {
+    if (dto.confirmation !== 'CREATE_CONTRACT') throw new BadRequestException('Confirme com CREATE_CONTRACT.');
+    const actor = await this.prisma.user.findUnique({ where: { id: actorId } });
+    assertPlatformOwner(actor || undefined);
+    if (!actor || !await bcrypt.compare(dto.currentPassword, actor.passwordHash)) throw new ForbiddenException('Senha incorreta.');
+    if (process.env.BILLING_CALENDAR_ENABLED !== 'true') throw new ConflictException('Ative o calendario mensal no servidor antes de criar contratos.');
+    return this.prisma.$transaction(async tx => {
+      // Same tenant lock as self-service signup, cancellation and plan changes.
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
+      const currentActor = await tx.user.findUnique({ where: { id: actorId } });
+      assertPlatformOwner(currentActor || undefined);
+      if (currentActor?.passwordHash !== actor.passwordHash || currentActor.tokenVersion !== actor.tokenVersion) throw new ForbiddenException('Entre novamente.');
+      const tenant = await tx.tenant.findUnique({ where: { id: tenantId }, include: { plan: true } });
+      if (!tenant) throw new NotFoundException('Empresa nao encontrada.');
+      if (await tx.subscription.findUnique({ where: { tenantId } })) throw new ConflictException('Empresa ja possui contrato. Atualize a lista; nao crie outra assinatura.');
+      const price = tenant.plan.priceCents;
+      if (!Number.isSafeInteger(price) || price < 500) throw new ConflictException('Plano precisa de valor valido, minimo R$ 5.');
+      const start = firstCalendarMonth(saoPauloDate());
+      if (tenant.planId !== dto.expectedPlanId || price !== dto.expectedPriceCents || start !== dto.expectedStartMonth) throw new ConflictException('Plano, valor ou calendario mudou. Feche e abra novamente a criacao do contrato.');
+      const customer = await this.asaas.createCustomer({ name: tenant.name, cpfCnpj: dto.cpfCnpj, email: dto.email });
+      if (!customer?.id) throw new ServiceUnavailableException('Cadastro no Asaas nao confirmado.');
+      const sub = await tx.subscription.create({ data: { tenantId, asaasCustomerId: customer.id,
+        status: 'ACTIVE', calendarEnabled: true, billingPriceCents: price, billingStartMonth: start,
+        billingOptions: { billingType: 'UNDEFINED' } } });
+      await tx.tenant.update({ where: { id: tenantId }, data: { status: 'ACTIVE' } });
+      await tx.auditEvent.create({ data: { tenantId, actorId, action: `billing.owner_created:${tenant.planId}:${price}:${start}` } });
+      return { subscriptionId: sub.id, tenantStatus: 'ACTIVE', subscriptionStatus: 'ACTIVE',
+        priceCents: price, scheduled: true, invoiceUrl: null, firstIssueDate: `${start}-01`, firstDueDate: `${start}-10` };
+    }, { timeout: 20000, maxWait: 5000 });
+  }
+
   async activate(tenantId: string, actorId: string, dto: ActivateContractDto) {
     if (dto.confirmation !== 'ACTIVATE') throw new BadRequestException('Confirme com ACTIVATE.');
     const actor = await this.prisma.user.findUnique({ where: { id: actorId } });

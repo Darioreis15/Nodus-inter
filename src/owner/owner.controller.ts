@@ -1,3 +1,4 @@
+import { CreateOwnerContractDto } from '../billing/dto/create-owner-contract.dto';
 import { ActivateContractDto, BillingActivation } from '../billing/billing-activation';
 import { BillingCalendar } from '../billing/billing-calendar';
 import { Body, Controller, Get, Injectable, Module, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards, CanActivate, ExecutionContext, ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
@@ -100,6 +101,10 @@ export class OwnerController {
   list(@Query() query: CompanyQuery) { return this.service.list(query); }
   @Patch('tenants/:id/plan') @AllowSuspendedTenant()
   plan(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: PlanChange) { return this.service.changePlan(id, user.userId, dto); }
+  @Get('tenants/:id/contract-preview') @AllowSuspendedTenant()
+  contractPreview(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) { return this.activation.previewCreation(id, user.userId); }
+  @Post('tenants/:id/contract') @AllowSuspendedTenant()
+  createContract(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: CreateOwnerContractDto) { return this.activation.createContract(id, user.userId, dto); }
   @Post('tenants/:id/activate') @AllowSuspendedTenant()
   activate(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: ActivateContractDto) { return this.activation.activate(id, user.userId, dto); }
   @Post('tenants/:id/cancel') @AllowSuspendedTenant()
