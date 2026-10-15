@@ -1,3 +1,6 @@
+import { UsersModule } from '../users/users.module';
+import { OwnerCompaniesService } from './owner-companies.service';
+import { CreateCompanyDto } from './create-company.dto';
 import { CreateOwnerContractDto } from '../billing/dto/create-owner-contract.dto';
 import { ActivateContractDto, BillingActivation } from '../billing/billing-activation';
 import { BillingCalendar } from '../billing/billing-calendar';
@@ -74,7 +77,7 @@ export class OwnerService {
 @Controller('owner')
 @UseGuards(JwtAuthGuard, OwnerGuard)
 export class OwnerController {
-  constructor(private service: OwnerService, private prisma: PrismaService, private billing: BillingService, private calendar: BillingCalendar, private activation: BillingActivation) {}
+  constructor(private service: OwnerService, private prisma: PrismaService, private billing: BillingService, private calendar: BillingCalendar, private activation: BillingActivation, private companies: OwnerCompaniesService) {}
   @Get('me') @AllowSuspendedTenant()
   me(@CurrentUser() user: AuthenticatedUser) { return { email: user.email, access: 'PLATFORM_OWNER' }; }
   @Get('summary') @AllowSuspendedTenant()
@@ -97,6 +100,8 @@ export class OwnerController {
   }
   @Get('plans') @AllowSuspendedTenant()
   plans() { return this.prisma.plan.findMany({ select: { id: true, name: true, priceCents: true, maxUsers: true, maxChannels: true }, orderBy: { priceCents: 'asc' } }); }
+  @Post('tenants') @AllowSuspendedTenant()
+  createCompany(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateCompanyDto) { return this.companies.create(user.userId, dto); }
   @Get('tenants') @AllowSuspendedTenant()
   list(@Query() query: CompanyQuery) { return this.service.list(query); }
   @Patch('tenants/:id/plan') @AllowSuspendedTenant()
@@ -110,5 +115,5 @@ export class OwnerController {
   @Post('tenants/:id/cancel') @AllowSuspendedTenant()
   cancel(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: CancelSubscriptionDto) { return this.billing.cancelAsOwner(id, user.userId, dto); }
 }
-@Module({ imports: [BillingModule], controllers: [OwnerController], providers: [OwnerService, OwnerGuard] })
+@Module({ imports: [BillingModule, UsersModule], controllers: [OwnerController], providers: [OwnerService, OwnerGuard, OwnerCompaniesService] })
 export class OwnerModule {}
