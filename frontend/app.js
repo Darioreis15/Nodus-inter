@@ -104,7 +104,7 @@ function emptyChat() { $('#chat').className = 'chat empty'; $('#chat').innerHTML
 function drawList(query = $('#search')?.value || '') {
   const list = $('#conversation-list'); if (!list) return;
   const matches = sortConversations(session.conversations).filter(c => `${c.contact.name || ''} ${c.contact.waId} ${c.lastMessage?.body || ''}`.toLowerCase().includes(query.toLowerCase()));
-  list.innerHTML = matches.length ? matches.map(c => `<button class="conversation ${session.active?.id === c.id ? 'active' : ''}" data-id="${escape(c.id)}">${contactAvatar(c)}<div class="conversation-info"><div><strong>${escape(c.contact.name || c.contact.waId)}</strong><time>${escape(conversationTime(c))}</time></div><p>${escape(c.lastMessage?.body || 'Sem mensagens')}</p><small>${escape(c.channel.name)}${c.departmentId ? ` · ${escape((session.departments || []).find(d => d.id === c.departmentId)?.name || 'Setor')}` : ''}</small></div></button>`).join('') : '<p class="no-results">Nenhum atendimento encontrado.</p>';
+  list.innerHTML = matches.length ? matches.map(c => `<button class="conversation ${session.active?.id === c.id ? 'active' : ''}" data-id="${escape(c.id)}">${contactAvatar(c)}<div class="conversation-info"><div><strong>${escape(c.contact.name || c.contact.waId)}</strong><time>${escape(conversationTime(c))}</time></div><p>${escape(c.lastMessage?.body || (c.lastMessage?.media?.kind === 'image' ? '📷 Foto' : c.lastMessage?.media ? '📄 PDF' : 'Sem mensagens'))}</p><small>${escape(c.channel.name)}${c.departmentId ? ` · ${escape((session.departments || []).find(d => d.id === c.departmentId)?.name || 'Setor')}` : ''}</small></div></button>`).join('') : '<p class="no-results">Nenhum atendimento encontrado.</p>';
   contactPhotos.observe(list);
   $$('.conversation', list).forEach(btn => btn.onclick = () => openConversation(btn.dataset.id));
 }
@@ -153,8 +153,29 @@ async function openConversation(id) {
 }
 function drawMessages(bottom = true) {
   const el = $('#messages'); if (!el) return;
-  el.innerHTML = session.messages.length ? [...session.messages].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id.localeCompare(b.id)).map(m => `<div class="message ${m.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}"><p>${escape(m.body)}</p><time>${escape(date(m.createdAt))} · ${escape(labels[m.status] || m.status)}</time></div>`).join('') : '<p class="no-results">Escreva a primeira mensagem para iniciar o atendimento.</p>';
+  el.innerHTML = session.messages.length ? [...session.messages].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id.localeCompare(b.id)).map(m => `<div class="message ${m.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}">${m.media ? `<button type="button" class="message-attachment" data-media-id="${escape(m.id)}">${m.media.kind === 'image' ? '📷 Ver foto' : '📄 Baixar PDF'}<small>${escape(m.media.fileName)}</small></button>` : ''}${m.body ? `<p>${escape(m.body)}</p>` : ''}<time>${escape(date(m.createdAt))} · <span class="message-receipt ${m.status === 'READ' && m.direction === 'OUTBOUND' ? 'is-read' : ''}">${m.direction === 'OUTBOUND' ? m.status === 'READ' || m.status === 'DELIVERED' ? '✓✓ ' : m.status === 'SENT' ? '✓ ' : '' : ''}${escape(labels[m.status] || m.status)}</span></time></div>`).join('') : '<p class="no-results">Escreva a primeira mensagem para iniciar o atendimento.</p>';
+  $$('[data-media-id]', el).forEach(button => button.onclick = () => busy(button, () => openMessageMedia(button.dataset.mediaId)));
   if (bottom) el.scrollTop = el.scrollHeight;
+}
+async function openMessageMedia(id) {
+  const message=session.messages.find(m=>m.id===id), conversationId=session.active?.id, token=session.token;
+  if(!message?.media || !conversationId || !token)return;
+  const response=await fetch(`${API_URL}/conversations/${encoded(conversationId)}/messages/${encoded(id)}/media`, {headers:{Authorization:`Bearer ${token}`},cache:'no-store',signal:AbortSignal.timeout(45000)});
+  if(!response.ok){const data=await response.json().catch(()=>({}));if(response.status===401)logout(false);throw new Error(data.message || 'Não foi possível abrir o anexo.');}
+  const blob=await response.blob();
+  if(session.token!==token || session.active?.id!==conversationId || session.page)return;
+  if(blob.size>10*1024*1024 || !['image/jpeg','image/png','image/webp','application/pdf'].includes(blob.type))throw new Error('Formato ou tamanho do arquivo não permitido.');
+  const url=URL.createObjectURL(blob);
+  if(message.media.kind==='image' && blob.type.startsWith('image/')){
+    const dialog=modal('Foto recebida','<img class="message-image-viewer" alt="Foto recebida pelo WhatsApp"><a class="primary media-download">Baixar foto</a>');
+    $('img',dialog).src=url;const link=$('a',dialog);link.href=url;link.download=message.media.fileName;
+    dialog.addEventListener('close',()=>URL.revokeObjectURL(url),{once:true});
+    // Also release when another dialog replaces this one or the page logs out.
+    const observer=new MutationObserver(()=>{if(!dialog.isConnected){URL.revokeObjectURL(url);observer.disconnect();}});
+    observer.observe(document.body,{childList:true});
+  }else{
+    const a=document.createElement('a');a.href=url;a.download=message.media.fileName;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
 }
 async function newConversation() {
   try {
@@ -257,7 +278,7 @@ async function connectionsPage() {
 async function drawChannels() {
   const root = $('#page-content');
   const rows = await api('/channels'); if (root !== $('#page-content') || session.page !== 'connections') return;
-  const el = $('#channel-list'); el.innerHTML = rows.map(c => `<article class="connection-card"><div class="section-title"><strong>${escape(c.name)}</strong><span class="status">${escape(c.status === 'PENDING' ? 'Aguardando conexão' : labels[c.status] || c.status)}</span></div><p>${escape(c.phoneNumber || 'Número ainda não consultado')} · ${c.type === 'QR_EVOLUTION' ? 'QR Code' : 'API oficial'}</p><div class="actions"><button class="outline" data-action="refresh" data-id="${escape(c.id)}">Consultar conexão</button>${c.type === 'QR_EVOLUTION' ? `<button class="outline" data-action="groups" data-id="${escape(c.id)}">Grupos: ${c.receiveGroupMessages === false ? 'não receber' : 'receber'}</button><button class="outline" data-action="qr" data-id="${escape(c.id)}">QR Code</button><button class="outline" data-action="restart" data-id="${escape(c.id)}">Reconectar</button><button class="outline" data-action="disconnect" data-id="${escape(c.id)}">Desconectar</button>` : `<button class="outline" data-action="token" data-id="${escape(c.id)}">Atualizar token</button>`}<button class="outline danger" data-action="delete" data-id="${escape(c.id)}">Excluir canal</button></div></article>`).join('') || '<p class="no-results">Nenhum canal cadastrado.</p>';
+  const el = $('#channel-list'); el.innerHTML = rows.map(c => `<article class="connection-card"><div class="section-title"><strong>${escape(c.name)}</strong><span class="status">${escape(c.status === 'PENDING' ? 'Aguardando conexão' : labels[c.status] || c.status)}</span></div><p>${escape(c.phoneNumber || 'Número ainda não consultado')} · ${c.type === 'QR_EVOLUTION' ? 'QR Code' : 'API oficial'}</p><div class="actions"><button class="outline" data-action="refresh" data-id="${escape(c.id)}">Consultar conexão</button>${c.type === 'QR_EVOLUTION' ? `<button class="outline" data-action="sync-webhook" data-id="${escape(c.id)}">Atualizar eventos</button><button class="outline" data-action="groups" data-id="${escape(c.id)}">Grupos: ${c.receiveGroupMessages === false ? 'não receber' : 'receber'}</button><button class="outline" data-action="qr" data-id="${escape(c.id)}">QR Code</button><button class="outline" data-action="restart" data-id="${escape(c.id)}">Reconectar</button><button class="outline" data-action="disconnect" data-id="${escape(c.id)}">Desconectar</button>` : `<button class="outline" data-action="token" data-id="${escape(c.id)}">Atualizar token</button>`}<button class="outline danger" data-action="delete" data-id="${escape(c.id)}">Excluir canal</button></div></article>`).join('') || '<p class="no-results">Nenhum canal cadastrado.</p>';
   $$('[data-action]', el).forEach(btn => btn.onclick = () => busy(btn, async () => {
     const c = rows.find(c => c.id === btn.dataset.id), action = btn.dataset.action;
     if (action === 'groups') {
@@ -269,7 +290,7 @@ async function drawChannels() {
     if (action === 'delete' && !confirm('Excluir o canal e todo o histórico local de suas conversas? Esta ação não pode ser desfeita.')) return;
     if (action === 'disconnect' && !confirm('Desconectar este WhatsApp? Será necessário ler um novo QR Code para conectá-lo novamente.')) return;
     await api(`/channels/${encoded(c.id)}${action === 'delete' ? '' : `/${action}`}`, { method:action === 'delete' ? 'DELETE' : 'POST' });
-    await drawChannels(); notice(action === 'restart' ? 'Reconexão solicitada. Consulte o estado em alguns segundos.' : 'Canal atualizado.');
+    await drawChannels(); notice(action === 'sync-webhook' ? 'Eventos de recebimento, entrega e leitura atualizados.' : action === 'restart' ? 'Reconexão solicitada. Consulte o estado em alguns segundos.' : 'Canal atualizado.');
   }));
 }
 async function getQr(id) {
@@ -509,7 +530,7 @@ async function funnelPage() {
   const root = $('#page-content');
   const [settings, open, pending] = await Promise.all([api('/workspace'), api('/conversations?status=OPEN'), api('/conversations?status=PENDING')]); if (root !== $('#page-content') || session.page !== 'funnel') return;
   const rows = [...open, ...pending]; const stages = [{ id:'', name:'Sem etapa' }, ...settings.stages];
-  $('#page-content').innerHTML = `<p class="muted">Mostrando até 100 conversas abertas e 100 aguardando, das mais recentes. Mover uma conversa aqui não envia mensagem. Configure mensagens por palavra-chave na aba Automações.</p><div class="funnel-board">${stages.map(s => `<section class="card funnel-column"><h2>${escape(s.name)}</h2>${rows.filter(c => s.id ? c.funnelStage === s.id : !settings.stages.some(x => x.id === c.funnelStage)).map(c => `<article class="funnel-item"><strong>${escape(c.contact.name || c.contact.waId)}</strong><p>${escape(c.lastMessage?.body || 'Sem mensagens')}</p><label>Etapa<select data-conversation="${escape(c.id)}"><option value="" disabled ${!c.funnelStage ? 'selected' : ''}>Selecionar etapa</option>${settings.stages.map(x => `<option value="${escape(x.id)}" ${x.id === c.funnelStage ? 'selected' : ''}>${escape(x.name)}</option>`).join('')}</select></label></article>`).join('') || '<p class="muted">Sem conversas nesta etapa.</p>'}</section>`).join('')}</div>`;
+  $('#page-content').innerHTML = `<p class="muted">Mostrando até 100 conversas abertas e 100 aguardando, das mais recentes. Mover uma conversa aqui não envia mensagem. Configure mensagens por palavra-chave na aba Automações.</p><div class="funnel-board">${stages.map(s => `<section class="card funnel-column"><h2>${escape(s.name)}</h2>${rows.filter(c => s.id ? c.funnelStage === s.id : !settings.stages.some(x => x.id === c.funnelStage)).map(c => `<article class="funnel-item"><strong>${escape(c.contact.name || c.contact.waId)}</strong><p>${escape(c.lastMessage?.body || (c.lastMessage?.media?.kind === 'image' ? '📷 Foto' : c.lastMessage?.media ? '📄 PDF' : 'Sem mensagens'))}</p><label>Etapa<select data-conversation="${escape(c.id)}"><option value="" disabled ${!c.funnelStage ? 'selected' : ''}>Selecionar etapa</option>${settings.stages.map(x => `<option value="${escape(x.id)}" ${x.id === c.funnelStage ? 'selected' : ''}>${escape(x.name)}</option>`).join('')}</select></label></article>`).join('') || '<p class="muted">Sem conversas nesta etapa.</p>'}</section>`).join('')}</div>`;
   $$('[data-conversation]').forEach(select => select.onchange = async () => { select.disabled = true; try { await api(`/conversations/${encoded(select.dataset.conversation)}/stage`, { method:'PATCH', body:body({ stageId:select.value }) }); await funnelPage(); } catch (err) { notice(err.message); select.disabled = false; } });
 }
 async function logsPage() {

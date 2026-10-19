@@ -1,3 +1,5 @@
+import { MessageMediaService } from './message-media.service';
+import { StreamableFile } from '@nestjs/common';
 import { ContactPhotosService } from './contact-photos.service';
 import { ConversationDepartmentDto } from './dto/department.dto';
 import { StartConversationDto, ContactNameDto, StageDto, TemplateMessageDto } from './dto/start-conversation.dto';
@@ -12,7 +14,7 @@ import { SendConversationMessageDto } from './dto/send-message.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('conversations')
 export class ConversationsController {
-  constructor(private conversationsService: ConversationsService, private photos: ContactPhotosService) {}
+  constructor(private conversationsService: ConversationsService, private photos: ContactPhotosService, private media: MessageMediaService) {}
 
   @Post()
   start(@CurrentUser() user: AuthenticatedUser, @Body() dto: StartConversationDto) {
@@ -58,6 +60,14 @@ export class ConversationsController {
   @Header('Cache-Control', 'no-store')
   photo(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.photos.forConversation(user.tenantId, id);
+  }
+
+  @Get(':id/messages/:messageId/media')
+  @Header('Cache-Control', 'no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  async attachment(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Param('messageId') messageId: string) {
+    const file = await this.media.download(user.tenantId, id, messageId);
+    return new StreamableFile(file.buffer, { type: file.mimeType, length: file.buffer.length, disposition: `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName).replace(/'/g, '%27')}` });
   }
 
   @Get(':id/messages')

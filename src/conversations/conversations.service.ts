@@ -1,3 +1,4 @@
+import { MessageMedia, publicMedia } from './message-media';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { defaults, withinHours, WorkspaceDto, AvailabilityDto } from '../workspace/workspace.dto';
@@ -53,6 +54,7 @@ export class ConversationsService {
     externalId: string | undefined,
     raw: unknown,
     contactName?: string,
+    media?: MessageMedia | null,
   ) {
     contactName = typeof contactName === 'string' ? contactName.trim().slice(0, 120) : undefined;
     const saved = await this.prisma.$transaction(async tx => {
@@ -82,7 +84,7 @@ export class ConversationsService {
         !await tx.message.findFirst({ where: { conversationId: conversation.id, direction: 'INBOUND' }, select: { id: true } });
       const message = await tx.message.create({ data: {
         conversationId: conversation.id, direction: 'INBOUND', externalId,
-        fromNumber, toNumber: channel.externalId ?? 'desconhecido', body: text, status: 'RECEIVED',
+        fromNumber, toNumber: channel.externalId ?? 'desconhecido', body: text, status: 'RECEIVED', ...(media ? { media: media as unknown as Prisma.InputJsonValue } : {}),
       } });
       const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: channel.tenantId } });
       const optOut = ['sair','parar','stop','cancelar'].includes(text.trim().toLowerCase());
@@ -214,7 +216,7 @@ export class ConversationsService {
       include: {
         contact: true,
         channel: { select: { id: true, name: true, type: true } },
-        messages: { orderBy: [{ createdAt: 'desc' }, {id:'desc'}], take: 1, select: { id: true, direction: true, body: true, status: true, createdAt: true, fromNumber: true, toNumber: true } },
+        messages: { orderBy: [{ createdAt: 'desc' }, {id:'desc'}], take: 1, select: { id: true, direction: true, body: true, status: true, createdAt: true, fromNumber: true, toNumber: true, media: true } },
       },
 
     });
@@ -230,7 +232,7 @@ export class ConversationsService {
       departmentId: c.departmentId,
       contact: { id: c.contact.id, waId: c.contact.waId, name: c.contact.name },
       channel: c.channel,
-      lastMessage: c.messages[0] ?? null,
+      lastMessage: c.messages[0] ? { ...c.messages[0], media: publicMedia(c.messages[0].media) } : null,
       updatedAt: c.updatedAt,
       createdAt: c.createdAt,
     }));
@@ -294,13 +296,14 @@ export class ConversationsService {
 
   async listMessages(tenantId: string, conversationId: string, cursor?: string) {
     await this.findOwnedConversation(tenantId, conversationId);
-    return this.prisma.message.findMany({
+    const messages = await this.prisma.message.findMany({
       where: { conversationId },
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 100,
-      select: { id: true, direction: true, body: true, status: true, createdAt: true, fromNumber: true, toNumber: true },
+      select: { id: true, direction: true, body: true, status: true, createdAt: true, fromNumber: true, toNumber: true, media: true },
     });
+    return messages.map(message => ({ ...message, media: publicMedia(message.media) }));
   }
 
   async start(tenantId: string, dto: StartConversationDto) {

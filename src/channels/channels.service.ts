@@ -120,6 +120,16 @@ export class ChannelsService {
     return this.evolutionConnector.getQrCode(config.instanceName);
   }
 
+  async syncWebhook(tenantId: string, channelId: string) {
+    const channel = await this.findOwnedChannel(tenantId, channelId);
+    if (channel.type !== 'QR_EVOLUTION') throw new BadRequestException('Atualizacao disponivel apenas para Evolution.');
+    const base = process.env.APP_BASE_URL?.replace(/\/$/, '');
+    if (!base?.startsWith('https://')) throw new BadRequestException('Configure APP_BASE_URL HTTPS no servidor.');
+    const instance = (channel.config as any)?.instanceName;
+    if (!instance) throw new BadRequestException('Instancia nao configurada.');
+    return this.evolutionConnector.syncWebhook(instance, `${base}/webhooks/evolution/${channel.id}`);
+  }
+
   async updateMetaToken(tenantId: string, channelId: string, accessToken: string) {
     const channel = await this.findOwnedChannel(tenantId, channelId);
     if (channel.type !== 'OFFICIAL_META') {

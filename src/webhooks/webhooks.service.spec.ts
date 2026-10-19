@@ -129,7 +129,7 @@ describe('WebhooksService', () => {
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('codigo=130497'));
         expect(JSON.stringify(warn.mock.calls)).not.toMatch(/SECRET|PHONE/);
         expect(prisma.message.updateMany).toHaveBeenCalledWith({
-          where: { externalId: 'wamid.failed', conversation: { channelId: 'channel-2' } },
+          where: { externalId: 'wamid.failed', direction: 'OUTBOUND', conversation: { channelId: 'channel-2' }, status: {in:['QUEUED','SENT','FAILED']} },
           data: { status: 'FAILED' },
         });
       } finally { warn.mockRestore(); }
@@ -154,7 +154,7 @@ describe('WebhooksService', () => {
       });
 
       expect(prisma.message.updateMany).toHaveBeenCalledWith({
-        where: { externalId: 'wamid.1', conversation: { channelId: 'channel-2' } },
+        where: { externalId: 'wamid.1', direction: 'OUTBOUND', conversation: { channelId: 'channel-2' }, status: {in:['QUEUED','SENT','FAILED','DELIVERED']} },
         data: { status: 'DELIVERED' },
       });
     });

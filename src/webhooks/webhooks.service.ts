@@ -1,3 +1,5 @@
+import { evolutionContent, metaContent } from '../conversations/message-media';
+import { MessageStatus } from '@prisma/client';
 import { metaErrorInfo } from '../channels/connectors/meta-api';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -22,7 +24,7 @@ export class WebhooksService {
       throw new NotFoundException('Canal nao encontrado para esse webhook.');
     }
 
-    const event = String(payload?.event ?? '').toLowerCase();
+    const event = String(payload?.event ?? '').toLowerCase().replace(/_/g, '.');
     this.logger.log(`[Evolution] evento identificado: "${event}" (canal ${channel.id})`);
 
     if (event === 'connection.update') {
@@ -30,6 +32,16 @@ export class WebhooksService {
       const status = state === 'open' ? 'CONNECTED' : state === 'close' ? 'DISCONNECTED' : channel.status;
       this.logger.log(`[Evolution] connection.update: state="${state}" -> status="${status}"`);
       await this.prisma.channel.update({ where: { id: channel.id }, data: { status } });
+      return { ok: true };
+    }
+
+    if (event === 'messages.update') {
+      for (const update of (Array.isArray(payload?.data) ? payload.data : [payload?.data])) {
+        if (update?.key?.fromMe === false || update?.fromMe === false) continue;
+        const value = update?.update?.status ?? update?.status;
+        const mapped: Record<string, MessageStatus> = { '0':'FAILED','2':'SENT','3':'DELIVERED','4':'READ','5':'READ', ERROR:'FAILED',SERVER_ACK:'SENT',DELIVERY_ACK:'DELIVERED',READ:'READ',PLAYED:'READ' };
+        await this.updateReceipt(channel.id, update?.keyId || update?.key?.id, mapped[String(value).toUpperCase()]);
+      }
       return { ok: true };
     }
 
@@ -42,7 +54,7 @@ export class WebhooksService {
         return { ok: true }; // eco da propria mensagem que a gente mandou, ignora
       }
 
-      const text = raw?.message?.conversation ?? raw?.message?.extendedTextMessage?.text ?? '';
+      const { text, media } = evolutionContent(raw);
       const from = String(raw?.key?.remoteJid ?? '').split('@')[0];
 
       await this.conversations.recordInboundMessage(
@@ -52,6 +64,7 @@ export class WebhooksService {
         raw?.key?.id,
         payload,
         raw?.key?.remoteJid?.endsWith('@g.us') ? undefined : raw?.pushName,
+        ...(media ? [media] : []),
       );
       return { ok: true };
     }
@@ -84,13 +97,15 @@ export class WebhooksService {
         this.logger.log(`[Meta] evento casado com o canal ${channel.id} (phone_number_id ${phoneNumberId})`);
 
         for (const message of value?.messages ?? []) {
+          const { text, media } = metaContent(message);
           await this.conversations.recordInboundMessage(
             channel,
             message.from,
-            message.text?.body ?? '',
+            text,
             message.id,
             message,
             value?.contacts?.find((c: any) => c.wa_id === message.from)?.profile?.name,
+            ...(media ? [media] : []),
           );
         }
 
@@ -102,10 +117,7 @@ export class WebhooksService {
               this.logger.warn(`[Meta] falha de entrega: codigo=${info.code ?? 'desconhecido'} subcodigo=${info.subcode ?? '-'}; ${info.message}`);
             }
           }
-          await this.prisma.message.updateMany({
-            where: { externalId: status.id, conversation: { channelId: channel.id } },
-            data: { status: this.mapMetaStatus(status.status) },
-          });
+          await this.updateReceipt(channel.id, status.id, this.mapMetaStatus(status.status));
         }
       }
     }
@@ -113,7 +125,13 @@ export class WebhooksService {
     return { ok: true };
   }
 
-  private mapMetaStatus(status: string): 'SENT' | 'DELIVERED' | 'READ' | 'FAILED' {
+  private async updateReceipt(channelId: string, externalId: unknown, status?: MessageStatus) {
+    if (!status || typeof externalId !== 'string' || !externalId || externalId.length > 512) return;
+    const allowed: Partial<Record<MessageStatus, MessageStatus[]>> = { SENT:['QUEUED','SENT'], DELIVERED:['QUEUED','SENT','FAILED','DELIVERED'], READ:['QUEUED','SENT','FAILED','DELIVERED','READ'], FAILED:['QUEUED','SENT','FAILED'] };
+    await this.prisma.message.updateMany({ where: { externalId, direction:'OUTBOUND', conversation:{channelId}, status:{in:allowed[status]} }, data:{status} });
+  }
+
+  private mapMetaStatus(status: string): MessageStatus | undefined {
     switch (status) {
       case 'delivered':
         return 'DELIVERED';
@@ -121,8 +139,8 @@ export class WebhooksService {
         return 'READ';
       case 'failed':
         return 'FAILED';
-      default:
-        return 'SENT';
+      case 'sent': return 'SENT';
+      default: return undefined;
     }
   }
 }

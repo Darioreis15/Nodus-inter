@@ -57,6 +57,9 @@ export class ChannelsController {
     return this.channelsService.updateGroups(user.tenantId, id, dto.receiveGroupMessages);
   }
 
+  @Roles('ADMIN') @Post(':id/sync-webhook')
+  syncWebhook(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) { return this.channelsService.syncWebhook(user.tenantId, id); }
+
   @Roles('ADMIN') @Post(':id/refresh')
   refresh(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.channelsService.refresh(user.tenantId, id);
