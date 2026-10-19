@@ -175,6 +175,8 @@ model Conversation {
   resolvedAt DateTime? @map("resolved_at")
   departmentId String? @map("department_id")
   funnelStage String? @map("funnel_stage")
+  pipelineStage String @default("QUEUE") @map("pipeline_stage")
+  replyDueAt DateTime? @map("reply_due_at")
   pendingAutomation Json? @map("pending_automation")
   automationCompleted Boolean @default(false) @map("automation_completed")
   channel      Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
@@ -183,6 +185,7 @@ model Conversation {
   messages     Message[]
   notes        ConversationNote[]
 
+  @@index([replyDueAt])
   @@index([channelId])
   @@index([contactId])
   @@index([assignedUserId])

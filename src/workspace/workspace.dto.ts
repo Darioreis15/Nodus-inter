@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsDefined, ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { IsIn, IsDefined, ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 export class ScheduleDto {
   @IsBoolean() enabled: boolean;
   @IsArray() @ArrayMaxSize(7) @ArrayUnique() @IsInt({ each: true }) @Min(0, { each: true }) @Max(6, { each: true }) days: number[];
@@ -13,7 +13,12 @@ export class DepartmentDto {
   @IsUUID() id: string;
   @IsString() @MinLength(1) @MaxLength(60) name: string;
 }
+export class PipelineSettingsDto {
+  @IsBoolean() enabled: boolean;
+  @IsInt() @Min(1) @Max(1440) waitMinutes: number;
+}
 export class FunnelStageDto {
+  @IsOptional() @IsIn(['QUEUE','IN_SERVICE','WAITING']) pipelineStage?: string;
   @IsOptional() @IsBoolean() waitForReply?: boolean;
   @IsOptional() @IsString() @MaxLength(4000) completionMessage?: string;
   @IsOptional() @IsUUID() fromStageId?: string;
@@ -25,6 +30,7 @@ export class FunnelStageDto {
   @IsOptional() @IsUUID() userId?: string;
 }
 export class WorkspaceDto {
+  @IsOptional() @ValidateNested() @Type(() => PipelineSettingsDto) pipeline?: PipelineSettingsDto;
   @IsOptional() @IsArray() @ArrayMaxSize(30) @ValidateNested({ each: true }) @Type(() => DepartmentDto) departments?: DepartmentDto[];
   @IsOptional() @IsUUID() awayDepartmentId?: string | null;
   @IsString() @MaxLength(80) timezone: string;
@@ -32,7 +38,7 @@ export class WorkspaceDto {
   @IsString() @MaxLength(4000) awayMessage: string;
   @IsArray() @ArrayMaxSize(20) @ValidateNested({ each: true }) @Type(() => FunnelStageDto) stages: FunnelStageDto[];
 }
-export const defaults = { timezone: 'America/Sao_Paulo', businessHours: { enabled: false, days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' }, awayMessage: '', awayDepartmentId: null, departments: [], stages: [] };
+export const defaults = { pipeline: {enabled:true,waitMinutes:10}, timezone: 'America/Sao_Paulo', businessHours: { enabled: false, days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' }, awayMessage: '', awayDepartmentId: null, departments: [], stages: [] };
 export function withinHours(schedule: ScheduleDto | undefined, timezone: string, now = new Date()): boolean {
   if (!schedule?.enabled) return true;
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
