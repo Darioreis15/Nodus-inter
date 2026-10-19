@@ -1,3 +1,4 @@
+import { MessageMediaService } from './message-media.service';
 import { ContactPhotosService } from './contact-photos.service';
 import { Module } from '@nestjs/common';
 import { ChannelsModule } from '../channels/channels.module';
@@ -9,7 +10,7 @@ import { ContactsService } from './contacts.service';
 @Module({
   imports: [ChannelsModule, OutboundWebhooksModule],
   controllers: [ConversationsController],
-  providers: [ConversationsService, ContactsService, ContactPhotosService],
+  providers: [MessageMediaService, ConversationsService, ContactsService, ContactPhotosService],
   exports: [ConversationsService],
 })
 export class ConversationsModule {}

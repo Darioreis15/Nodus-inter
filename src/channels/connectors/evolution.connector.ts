@@ -48,7 +48,7 @@ export class EvolutionConnector implements ChannelConnector {
         instanceName,
         qrcode: true,
         integration: 'WHATSAPP-BAILEYS',
-        webhook: { enabled: true, headers: { 'x-evolution-token': process.env.EVOLUTION_WEBHOOK_TOKEN }, url: webhookUrl, events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'] },
+        webhook: { enabled: true, headers: { 'x-evolution-token': process.env.EVOLUTION_WEBHOOK_TOKEN }, url: webhookUrl, events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE'] },
       }),
     });
 
@@ -56,6 +56,17 @@ export class EvolutionConnector implements ChannelConnector {
       const detail = await response.text();
       throw new BadGatewayException(`Falha ao criar instancia na Evolution API: HTTP ${response.status}`);
     }
+  }
+
+  async syncWebhook(instanceName: string, webhookUrl: string) {
+    if (!process.env.EVOLUTION_WEBHOOK_TOKEN) throw new BadGatewayException('Token do webhook Evolution nao configurado.');
+    const response = await fetch(`${this.baseUrl}/webhook/set/${encodeURIComponent(instanceName)}`, {
+      method:'POST', redirect:'error', signal:AbortSignal.timeout(10000),
+      headers:{apikey:this.globalApiKey,'Content-Type':'application/json'},
+      body:JSON.stringify({webhook:{enabled:true,url:webhookUrl,headers:{'x-evolution-token':process.env.EVOLUTION_WEBHOOK_TOKEN},byEvents:false,base64:false,events:['MESSAGES_UPSERT','MESSAGES_UPDATE','CONNECTION_UPDATE']}}),
+    });
+    if (!response.ok) throw new BadGatewayException('Nao foi possivel atualizar os eventos do webhook Evolution.');
+    return {updated:true};
   }
 
   async getQrCode(instanceName: string): Promise<{ base64?: string; status: string }> {

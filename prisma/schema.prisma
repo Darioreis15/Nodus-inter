@@ -196,6 +196,7 @@ model Message {
   toNumber       String           @map("to_number")
   body           String
   status         MessageStatus    @default(QUEUED)
+  media          Json?
   raw            Json?
   createdAt      DateTime         @default(now())
 
