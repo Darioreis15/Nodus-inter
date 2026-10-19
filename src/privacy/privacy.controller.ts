@@ -23,7 +23,7 @@ export class PrivacyController {
   }
   @AllowSuspendedTenant()
   @Get('contacts/:id')
-  async exportContact(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Query('cursor') cursor?: string) {
+  async exportContact(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Query('cursor') cursor?: string, @Query('notesCursor') notesCursor?: string) {
     const contact = await this.prisma.contact.findFirst({ where: { id, tenantId: user.tenantId } });
     if (!contact) throw new NotFoundException();
     const messages = await this.prisma.message.findMany({
@@ -33,7 +33,8 @@ export class PrivacyController {
     });
     await this.prisma.auditEvent.create({ data: { tenantId: user.tenantId, actorId: user.userId, action: 'privacy.contact.export' } });
     const scheduledMessages = await this.prisma.campaignDelivery.findMany({where:{contactId:id,campaign:{tenantId:user.tenantId},status:{in:['QUEUED','SENDING']},...(cursor ? {id:{gt:cursor}} : {})},orderBy:{id:'asc'},take:100,select:{id:true,dueAt:true,status:true,payload:true}});
-    return { scheduledMessages, scheduledNextCursor:scheduledMessages.length === 100 ? scheduledMessages[99].id : null, contact: { id: contact.id, name: contact.name, waId: contact.waId }, messages, nextCursor: messages.length === 100 ? messages[99].id : null };
+    const notes = await this.prisma.conversationNote.findMany({where:{conversation:{contactId:id,channel:{tenantId:user.tenantId}},...(notesCursor ? {id:{gt:notesCursor}} : {})},orderBy:{id:'asc'},take:100,select:{id:true,body:true,createdAt:true,conversationId:true}});
+    return { notes, notesNextCursor:notes.length === 100 ? notes[99].id : null, scheduledMessages, scheduledNextCursor:scheduledMessages.length === 100 ? scheduledMessages[99].id : null, contact: { id: contact.id, name: contact.name, waId: contact.waId }, messages, nextCursor: messages.length === 100 ? messages[99].id : null };
   }
   @AllowSuspendedTenant()
   @Delete('contacts/:id')

@@ -113,6 +113,7 @@ model User {
   availability Json @default("{}")
   passwordResets PasswordReset[]
   assignedConversations Conversation[]
+  conversationNotes ConversationNote[]
 
   @@index([tenantId])
   @@map("users")
@@ -180,6 +181,7 @@ model Conversation {
   contact      Contact   @relation(fields: [contactId], references: [id])
   assignedUser User?     @relation(fields: [assignedUserId], references: [id])
   messages     Message[]
+  notes        ConversationNote[]
 
   @@index([channelId])
   @@index([contactId])
@@ -352,4 +354,16 @@ model BillingCycle {
   subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
   @@unique([subscriptionId, month])
   @@map("billing_cycles")
+}
+
+model ConversationNote {
+  id String @id @default(uuid())
+  conversationId String @map("conversation_id")
+  authorId String? @map("author_id")
+  body String
+  createdAt DateTime @default(now()) @map("created_at")
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  @@index([conversationId, createdAt])
+  @@map("conversation_notes")
 }

@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 
-type RetentionDb = Pick<PrismaClient, 'message' | 'rateBucket' | 'providerEvent' | 'auditEvent' | 'campaignDelivery'>;
+type RetentionDb = Pick<PrismaClient, 'message' | 'rateBucket' | 'providerEvent' | 'auditEvent' | 'campaignDelivery' | 'conversationNote'>;
 
 export async function runRetention(db: RetentionDb, env: NodeJS.ProcessEnv, now = new Date()) {
   const messageDays = Number(env.MESSAGE_RETENTION_DAYS);
@@ -30,6 +30,7 @@ export async function runRetention(db: RetentionDb, env: NodeJS.ProcessEnv, now 
     (await db.providerEvent.deleteMany({ where: providers })).count,
     (await db.auditEvent.deleteMany({ where: audits })).count,
     (await db.campaignDelivery.deleteMany({ where: deliveries })).count,
+    (await db.conversationNote.deleteMany({ where: { ...eligible, createdAt: { lt: messageCutoff } } })).count,
   ] : await Promise.all([
     db.message.count({ where: messages }),
     db.message.count({ where: raw }),
@@ -37,6 +38,7 @@ export async function runRetention(db: RetentionDb, env: NodeJS.ProcessEnv, now 
     db.providerEvent.count({ where: providers }),
     db.auditEvent.count({ where: audits }),
     db.campaignDelivery.count({ where: deliveries }),
+    db.conversationNote.count({ where: { ...eligible, createdAt: { lt: messageCutoff } } }),
   ]);
   return {
     mode: apply ? 'APPLIED' : 'DRY_RUN',
@@ -44,7 +46,7 @@ export async function runRetention(db: RetentionDb, env: NodeJS.ProcessEnv, now 
     cutoffs: { messages: messageCutoff.toISOString(), auditEvents: auditCutoff.toISOString(), providerEvents: providerCutoff.toISOString() },
     counts: {
       messages: counts[0], rawPayloads: counts[1], expiredRateBuckets: counts[2],
-      providerEvents: counts[3], auditEvents: counts[4], campaignDeliveries: counts[5],
+      providerEvents: counts[3], auditEvents: counts[4], campaignDeliveries: counts[5], conversationNotes: counts[6],
     },
   };
 }
