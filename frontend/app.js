@@ -1,3 +1,4 @@
+import { createAutoRefresh, mergeRecent } from './auto-refresh.js?v=20';
 import { sortConversations, conversationTime } from './conversation-order.js?v=16';
 import { createCampaignContacts, mergeCampaignRecipients } from './campaign-contacts.js?v=15';
 import { createContactPhotos } from './contact-photos.js?v=14';
@@ -31,12 +32,13 @@ function contactAvatar(c) {
 
 function logo() { return '<div class="brand"><img src="./logo-nodus-mark.svg" alt=""/><span>Nodus</span></div>'; }
 async function api(path, options = {}) {
+  const requestToken = session.token;
   const response = await fetch(`${API_URL}${path}`, { ...options, signal: AbortSignal.timeout(25000), headers: { 'Content-Type':'application/json', ...(session.token ? { Authorization:`Bearer ${session.token}` } : {}), ...options.headers } });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401 && !path.startsWith('/auth/')) logout(false);
+    if (response.status === 401 && !path.startsWith('/auth/') && session.token === requestToken) logout(false);
     const error = new Error(Array.isArray(payload.message) ? payload.message.join(' ') : payload.message || 'Não foi possível concluir a solicitação.');
-    error.status = response.status; throw error;
+    error.status = response.status; error.retryAfter = Number(payload.retryAfter || response.headers.get('Retry-After')) || 0; throw error;
   }
   return payload;
 }
@@ -577,20 +579,54 @@ async function startApp() {
   const identity = await api('/auth/me'); session.user = identity.user; session.tenant = identity.tenant;
   renderShell(); if (identity.tenant.status === 'SUSPENDED') openPage('billing'); else await loadConversations();
 }
-// Refresh the open chat only. No polling while hidden or unauthenticated.
-let polling = false;
-setInterval(async () => {
-  if (document.hidden || polling || !session.token || !session.active || session.page) return;
-  polling = true; const id = session.active.id, generation = session.generation;
-  try {
-    const rows = await api(`/conversations/${encoded(id)}/messages`);
-    if (generation !== session.generation || session.active?.id !== id) return;
-    const el = $('#messages'), bottom = el && el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-    const byId = new Map(session.messages.map(m => [m.id,m])); rows.forEach(m => byId.set(m.id,m)); session.messages = [...byId.values()];
-    if (rows.length) { session.active.lastMessage = [...rows].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)||b.id.localeCompare(a.id))[0]; drawList(); }
-    drawMessages(bottom);
-  } catch (err) { if (err.status !== 401) notice(err.status === 429 ? 'Atualização pausada pelo limite de requisições. Aguarde.' : err.message); }
-  finally { polling = false; }
-}, 30000);
+// Refresh messages every five seconds; the first conversation page every ten.
+// Revalidate session/navigation after every await so stale requests cannot repaint.
+let nextListRefresh = 0;
+const autoRefresh = createAutoRefresh({
+  enabled: () => !!session.token && !!session.user && !session.page && session.tenant?.status !== 'SUSPENDED' && !document.hidden && navigator.onLine !== false && !!$('#conversation-list'),
+  refresh: async () => {
+    const token = session.token, generation = session.generation, id = session.active?.id;
+    const current = () => session.token === token && session.generation === generation && !session.page;
+    if (id) {
+      let rows;
+      try { rows = await api(`/conversations/${encoded(id)}/messages`); }
+      catch (err) {
+        if (!current()) return;
+        if (err.status === 404) { session.active = null; emptyChat(); nextListRefresh = 0; notice('Esta conversa não está mais disponível.'); }
+        else throw err;
+      }
+      if (!current()) return;
+      if (rows && session.active?.id === id) {
+        const merged = mergeRecent(session.messages, rows, 100, m => m.createdAt);
+        if (JSON.stringify(merged) !== JSON.stringify(session.messages)) {
+          const el = $('#messages'), scrollTop = el?.scrollTop || 0;
+          const bottom = el && el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+          session.messages = merged; drawMessages(bottom);
+          if (!bottom && el) el.scrollTop = scrollTop;
+        }
+      }
+    }
+    if (!current() || Date.now() < nextListRefresh) return;
+    const rows = await api(`/conversations?status=${encoded(session.filter)}&departmentId=${encoded($('#department-filter')?.value || '')}`);
+    if (!current()) return;
+    nextListRefresh = Date.now() + 10000;
+    const merged = mergeRecent(session.conversations, rows, 100, c => c.lastMessage?.createdAt || c.createdAt);
+    if (JSON.stringify(merged) !== JSON.stringify(session.conversations)) {
+      const active = session.active, updated = active && merged.find(c => c.id === active.id);
+      if (updated) { Object.assign(active, updated); merged[merged.indexOf(updated)] = active; }
+      session.conversations = merged;
+      const list = $('#conversation-list'), scrollTop = list.scrollTop;
+      drawList(); list.scrollTop = scrollTop;
+      $('#more-conversations').hidden = rows.length < 100 && merged.length < 100;
+    }
+  },
+  onError: err => {
+    if (!session.token || err.status === 401) return;
+    notice(err.status === 429 ? 'Atualização automática pausada pelo limite. Retomaremos em instantes.' : 'Conexão interrompida. Tentaremos atualizar novamente automaticamente.');
+  },
+});
+autoRefresh.start();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { nextListRefresh = 0; autoRefresh.wake(); } });
+window.addEventListener('online', () => { nextListRefresh = 0; autoRefresh.wake(); });
 const resetToken = new URLSearchParams(location.hash.slice(1)).get('reset');
 resetToken ? resetPassword(resetToken) : renderLogin();
