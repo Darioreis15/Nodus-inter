@@ -1,6 +1,17 @@
 import { WebhooksService } from './webhooks.service';
 
 describe('Comprovantes de entrega e leitura', () => {
+  it('importa apenas ecos de anexos validos e respeita grupos desativados', async () => {
+    const recordOutboundAttachment = jest.fn();
+    const channel = {id:'one',config:{receiveGroupMessages:false}};
+    const service = new WebhooksService({channel:{findUnique:jest.fn().mockResolvedValue(channel)}} as any,{recordOutboundAttachment} as any);
+    const data = {key:{id:'file',fromMe:true,remoteJid:'5511999999999@s.whatsapp.net'},message:{imageMessage:{mimetype:'image/jpeg'}}};
+    await service.handleEvolutionEvent('one',{event:'messages.upsert',data});
+    expect(recordOutboundAttachment).toHaveBeenCalledTimes(1);
+    data.key.remoteJid='123@g.us'; await service.handleEvolutionEvent('one',{event:'messages.upsert',data});
+    data.key.remoteJid='status@broadcast'; await service.handleEvolutionEvent('one',{event:'messages.upsert',data});
+    expect(recordOutboundAttachment).toHaveBeenCalledTimes(1);
+  });
   it('mantem READ com eventos atrasados e isola canal e direcao', async () => {
     const rows = [
       { externalId: 'abc', channelId: 'one', direction: 'OUTBOUND', status: 'SENT' },

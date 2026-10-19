@@ -9,6 +9,13 @@ export interface SendResult {
   externalId: string;
 }
 
+export interface OutboundMediaMessage {
+  to: string;
+  caption: string;
+  buffer: Buffer;
+  media: {kind:'image'|'document';mimeType:string;fileName:string};
+}
+
 /**
  * Contrato unico que o resto do sistema usa pra falar com o WhatsApp,
  * seja a instancia rodando via QR Code (Evolution API) ou via API oficial
