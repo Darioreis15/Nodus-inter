@@ -39,6 +39,10 @@ export function createAttachmentPreviews({ load, maxBytes = 40 * 1024 * 1024 }) 
   }
   return {
     get(id) { return cache.get(id)?.blob; },
+    remember(id, blob) {
+      if (!id || cache.has(id) || bytes + blob.size > maxBytes) return;
+      bytes += blob.size; cache.set(id, {blob, url:URL.createObjectURL(blob)});
+    },
     observe(root) {
       observer?.disconnect();
       const enqueue = element => {

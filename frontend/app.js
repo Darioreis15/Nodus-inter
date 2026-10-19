@@ -1,4 +1,4 @@
-import { createAttachmentPreviews } from './attachment-previews.js?v=21';
+import { createAttachmentPreviews } from './attachment-previews.js?v=22';
 import { createAutoRefresh, mergeRecent } from './auto-refresh.js?v=20';
 import { sortConversations, conversationTime } from './conversation-order.js?v=16';
 import { createCampaignContacts, mergeCampaignRecipients } from './campaign-contacts.js?v=15';
@@ -132,7 +132,7 @@ async function openConversation(id) {
   attachmentPreviews.clear();
   session.page = null; session.active = c; const generation = ++session.generation;
   drawList(); const chat = $('#chat'); chat.className = 'chat mobile-open';
-  chat.innerHTML = `<header class="chat-header"><button class="icon-btn mobile-back" aria-label="Voltar às conversas">←</button>${contactAvatar(c)}<div><h2>${escape(c.contact.name || c.contact.waId)}</h2><p>${escape(c.contact.waId)} · ${escape(c.channel.name)}</p></div><div class="chat-actions"><button class="outline" id="rename-contact">Nome</button><button class="outline" id="transfer-department">Setor</button><button class="outline" id="assign">Assumir</button><button class="resolve" id="resolve">Resolver ✓</button>${c.channel.type === 'QR_EVOLUTION' ? '<button class="danger outline" id="delete-conversation">Excluir</button>' : '<button class="outline" id="send-template">Template</button>'}</div></header><button class="text-button" id="older-messages" hidden>Carregar mensagens anteriores</button><div id="messages" class="messages"><p class="loading">Carregando…</p></div><form id="message-form" class="composer"><textarea name="text" rows="2" maxlength="4000" placeholder="Escreva uma mensagem" aria-label="Mensagem" required></textarea><button class="send" type="submit" aria-label="Enviar mensagem">➜</button></form>`;
+  chat.innerHTML = `<header class="chat-header"><button class="icon-btn mobile-back" aria-label="Voltar às conversas">←</button>${contactAvatar(c)}<div><h2>${escape(c.contact.name || c.contact.waId)}</h2><p>${escape(c.contact.waId)} · ${escape(c.channel.name)}</p></div><div class="chat-actions"><button class="outline" id="rename-contact">Nome</button><button class="outline" id="transfer-department">Setor</button><button class="outline" id="assign">Assumir</button><button class="resolve" id="resolve">Resolver ✓</button>${c.channel.type === 'QR_EVOLUTION' ? '<button class="danger outline" id="delete-conversation">Excluir</button>' : '<button class="outline" id="send-template">Template</button>'}</div></header><button class="text-button" id="older-messages" hidden>Carregar mensagens anteriores</button><div id="messages" class="messages"><p class="loading">Carregando…</p></div><form id="message-form" class="composer"><button type="button" class="outline attach-button" id="attach-file" aria-label="Anexar foto ou PDF" title="Anexar foto ou PDF">📎</button><textarea name="text" rows="2" maxlength="4000" placeholder="Escreva uma mensagem" aria-label="Mensagem" required></textarea><button class="send" type="submit" aria-label="Enviar mensagem">➜</button></form>`;
   $('.mobile-back').onclick = () => { chat.classList.remove('mobile-open'); };
   $('#transfer-department').onclick = async () => { const w = await api('/workspace'); modal('Encaminhar para setor', `<form id="transfer-form"><label>Setor<select name="departmentId">${departmentOptions(w.departments || [],c.departmentId)}</select></label><p>A transferência libera o atendente atual e mantém a conversa na fila.</p><button class="primary">Encaminhar</button></form>`); bindForm('#transfer-form', async data => { await api(`/conversations/${encoded(id)}/department`, { method:'PATCH', body:body({ departmentId:data.departmentId || null }) }); $('#modal').close(); await loadConversations(session.filter); }); };
   $('#assign').onclick = e => busy(e.currentTarget, async () => { await api(`/conversations/${encoded(id)}/assign`, { method:'PATCH', body:'{}' }); notice('Atendimento atribuído a você.'); });
@@ -147,6 +147,7 @@ async function openConversation(id) {
     if (session.active?.id !== id) return;
     session.messages = [...session.messages, sent]; drawMessages(); form.reset(); c.lastMessage = sent; drawList();
   });
+  $('#attach-file').onclick = () => attachFile(c);
   $('#older-messages').onclick = e => busy(e.currentTarget, async () => {
     const oldest = [...session.messages].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id.localeCompare(b.id))[0];
     const rows = await api(`/conversations/${encoded(id)}/messages?cursor=${encoded(oldest.id)}`);
@@ -203,6 +204,52 @@ async function openMessageMedia(id) {
     dialog.addEventListener('close',()=>URL.revokeObjectURL(url),{once:true});
     const observer=new MutationObserver(()=>{if(!dialog.isConnected){URL.revokeObjectURL(url);observer.disconnect();}}); observer.observe(document.body,{childList:true});
   }
+}
+function attachFile(conversation) {
+  const meta = conversation.channel.type === 'OFFICIAL_META';
+  const accepted = meta ? 'image/jpeg,image/png,application/pdf' : 'image/jpeg,image/png,image/webp,application/pdf';
+  const dialog = modal('Enviar foto ou PDF', `<form id="attachment-form"><label>Arquivo<input type="file" name="file" accept="${accepted}" required></label><small>${meta ? 'Fotos JPEG/PNG: até 5 MB. PDF: até 10 MB. Requer mensagem do cliente nas últimas 24 horas.' : 'Fotos JPEG/PNG/WebP e PDF: até 10 MB.'}</small><div class="selected-attachment-preview" hidden></div><label>Legenda (opcional)<textarea name="caption" maxlength="1024" rows="2"></textarea></label><p class="form-error" hidden></p><button type="submit" class="primary">Enviar arquivo</button></form>`);
+  const form=$('form',dialog), input=$('[name=file]',form), preview=$('.selected-attachment-preview',form), error=$('.form-error',form), submit=$('[type=submit]',form);
+  let url;
+  const release=()=>{if(url){URL.revokeObjectURL(url);url=null;}};
+  dialog.addEventListener('close',release,{once:true});
+  const observer=new MutationObserver(()=>{if(!dialog.isConnected){release();observer.disconnect();}});observer.observe(document.body,{childList:true});
+  function validate(file) {
+    if(!file || !accepted.split(',').includes(file.type))throw new Error('Selecione uma foto ou PDF em um dos formatos permitidos.');
+    const max=meta && file.type.startsWith('image/') ? 5 : 10;
+    if(!file.size || file.size>max*1024*1024)throw new Error(`O arquivo deve ter até ${max} MB e não pode estar vazio.`);
+  }
+  input.onchange=()=>{
+    release();preview.replaceChildren();preview.hidden=true;error.hidden=true;
+    try {
+      const file=input.files[0];validate(file);url=URL.createObjectURL(file);preview.hidden=false;
+      const node=document.createElement(file.type==='application/pdf'?'object':'img');
+      if(file.type==='application/pdf'){node.type='application/pdf';node.data=url+'#page=1&view=FitH&toolbar=0';node.textContent='PDF selecionado. A prévia depende do leitor do navegador.';}
+      else{node.src=url;node.alt='Prévia do arquivo selecionado';}
+      preview.append(node);
+    }catch(err){error.textContent=err.message;error.hidden=false;}
+  };
+  form.onsubmit=event=>{
+    event.preventDefault();busy(submit,async()=>{
+      const token=session.token,id=conversation.id,file=input.files[0],caption=$('[name=caption]',form).value.trim();
+      try {
+        validate(file);if(!token)throw new Error('Entre novamente para enviar.');
+        error.hidden=true;submit.textContent='Enviando…';input.disabled=true;$('[name=caption]',form).disabled=true;
+        const data=new FormData();data.append('file',file,file.name);data.append('caption',caption);
+        const response=await fetch(`${API_URL}/conversations/${encoded(id)}/attachments`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:data,signal:AbortSignal.timeout(70000)});
+        const payload=await response.json().catch(()=>({}));
+        if(!response.ok){if(response.status===401 && session.token===token)logout(false);throw new Error(Array.isArray(payload.message)?payload.message.join(' '):payload.message || 'Falha no envio. Confira a conversa antes de tentar novamente.');}
+        if(session.token!==token)return;
+        if(session.active?.id===id && !session.page){
+          attachmentPreviews.remember(payload.id,file);
+          session.messages=[...session.messages.filter(m=>m.id!==payload.id),payload];
+          session.active.lastMessage=payload;drawMessages();drawList();
+        }
+        dialog.close();notice('Arquivo enviado ao provedor. Acompanhe a confirmação de entrega na conversa.');
+      }catch(err){error.textContent=err.name==='TimeoutError' || err.name==='TypeError' ? 'Não foi possível confirmar o envio. Confira o WhatsApp antes de repetir para evitar duplicidade.' : err.message;error.hidden=false;}
+      finally{submit.textContent='Enviar arquivo';input.disabled=false;$('[name=caption]',form).disabled=false;}
+    });
+  };
 }
 async function newConversation() {
   try {

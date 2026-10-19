@@ -1,8 +1,8 @@
-import { metaRequest } from './meta-api';
+import { metaRequest, META_GRAPH_VERSION, metaErrorInfo } from './meta-api';
 import { unseal } from '../../security/secrets';
 import { Injectable, BadGatewayException } from '@nestjs/common';
 import { ChannelRecord as Channel } from '../channel.types';
-import { ChannelConnector, OutboundTextMessage, SendResult } from './channel-connector.interface';
+import { ChannelConnector, OutboundTextMessage, OutboundMediaMessage, SendResult } from './channel-connector.interface';
 
 interface MetaConfig {
   phoneNumberId: string;
@@ -19,6 +19,32 @@ interface MetaConfig {
  */
 @Injectable()
 export class MetaConnector implements ChannelConnector {
+  async sendMedia(channel:Channel, message:OutboundMediaMessage):Promise<SendResult & {providerId?:string}> {
+    const config = channel.config as unknown as MetaConfig;
+    const token = unseal(config.accessToken, `meta:${config.phoneNumberId}`);
+    const form = new FormData();
+    form.append('messaging_product','whatsapp');
+    form.append('type',message.media.mimeType);
+    form.append('file',new Blob([new Uint8Array(message.buffer)],{type:message.media.mimeType}),message.media.fileName);
+    let uploaded: any;
+    try {
+      const response = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${encodeURIComponent(config.phoneNumberId)}/media`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:form,redirect:'error',signal:AbortSignal.timeout(45000)});
+      uploaded = await response.json().catch(()=>null);
+      if (!response.ok || uploaded?.error) throw new BadGatewayException(metaErrorInfo(uploaded?.error).message);
+      if (typeof uploaded?.id !== 'string' || !/^\d+$/.test(uploaded.id)) throw new BadGatewayException('A Meta nao retornou identificador do arquivo.');
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      throw new BadGatewayException('Nao foi possivel carregar o arquivo na Meta.');
+    }
+    const kind = message.media.kind;
+    const data = await metaRequest(`${encodeURIComponent(config.phoneNumberId)}/messages`,token,{
+      messaging_product:'whatsapp',to:message.to,type:kind,
+      [kind]:{id:uploaded.id,...(message.caption ? {caption:message.caption} : {}),...(kind==='document' ? {filename:message.media.fileName} : {})},
+    });
+    if (typeof data?.messages?.[0]?.id !== 'string' || !data.messages[0].id) throw new BadGatewayException('Meta sem confirmacao do envio. Confira a conversa antes de repetir.');
+    return {externalId:data.messages[0].id,providerId:uploaded.id};
+  }
+
   async sendTemplate(channel: Channel, to: string, template: { name: string; language: string; parameters: string[] }): Promise<SendResult> {
     const config = channel.config as unknown as MetaConfig;
     const data = await metaRequest(`${encodeURIComponent(config.phoneNumberId)}/messages`,

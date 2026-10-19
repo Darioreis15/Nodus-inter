@@ -1,6 +1,6 @@
 import { Injectable, BadGatewayException } from '@nestjs/common';
 import { ChannelRecord as Channel } from '../channel.types';
-import { ChannelConnector, OutboundTextMessage, SendResult } from './channel-connector.interface';
+import { ChannelConnector, OutboundTextMessage, OutboundMediaMessage, SendResult } from './channel-connector.interface';
 
 interface EvolutionConfig {
   instanceName: string;
@@ -18,6 +18,25 @@ interface EvolutionConfig {
  */
 @Injectable()
 export class EvolutionConnector implements ChannelConnector {
+  async sendMedia(channel: Channel, message: OutboundMediaMessage): Promise<SendResult & {providerId?:string}> {
+    const config = channel.config as unknown as EvolutionConfig;
+    if (!config?.instanceName) throw new BadGatewayException('Instancia Evolution nao configurada.');
+    try {
+      const response = await fetch(`${this.baseUrl}/message/sendMedia/${encodeURIComponent(config.instanceName)}`, {
+        method:'POST',redirect:'error',signal:AbortSignal.timeout(45000),
+        headers:{apikey:this.globalApiKey,'Content-Type':'application/json'},
+        body:JSON.stringify({number:message.to,mediatype:message.media.kind,mimetype:message.media.mimeType,caption:message.caption,fileName:message.media.fileName,media:message.buffer.toString('base64')}),
+      });
+      if (!response.ok) throw new BadGatewayException('A Evolution recusou o arquivo. Confira o canal antes de tentar novamente.');
+      const data = await response.json(); const id = data?.key?.id || data?.messageId;
+      if (typeof id !== 'string' || !id || id.length > 512) throw new BadGatewayException('Evolution sem confirmacao do envio. Confira o WhatsApp antes de repetir.');
+      return {externalId:id};
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      throw new BadGatewayException('Falha de comunicacao no envio. Confira o WhatsApp antes de repetir para evitar duplicidade.');
+    }
+  }
+
   private get baseUrl(): string {
     const url = process.env.EVOLUTION_API_BASE_URL;
     if (!url) {

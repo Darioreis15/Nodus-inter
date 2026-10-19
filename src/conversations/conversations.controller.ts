@@ -1,9 +1,12 @@
 import { MessageMediaService } from './message-media.service';
+import { AttachmentSendService } from './attachment-send.service';
+import { AttachmentDto, AttachmentFile, AttachmentUploadGate, attachmentUploadOptions } from './attachment-upload';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { StreamableFile } from '@nestjs/common';
 import { ContactPhotosService } from './contact-photos.service';
 import { ConversationDepartmentDto } from './dto/department.dto';
 import { StartConversationDto, ContactNameDto, StageDto, TemplateMessageDto } from './dto/start-conversation.dto';
-import { Delete, Body, Controller, Get, Header, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Delete, Body, Controller, Get, Header, Param, Patch, Post, Query, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ConversationsService } from './conversations.service';
@@ -14,7 +17,7 @@ import { SendConversationMessageDto } from './dto/send-message.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('conversations')
 export class ConversationsController {
-  constructor(private conversationsService: ConversationsService, private photos: ContactPhotosService, private media: MessageMediaService) {}
+  constructor(private conversationsService: ConversationsService, private photos: ContactPhotosService, private media: MessageMediaService, private attachmentSender: AttachmentSendService) {}
 
   @Post()
   start(@CurrentUser() user: AuthenticatedUser, @Body() dto: StartConversationDto) {
@@ -73,6 +76,12 @@ export class ConversationsController {
   @Get(':id/messages')
   listMessages(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Query('cursor') cursor?: string) {
     return this.conversationsService.listMessages(user.tenantId, id, cursor);
+  }
+
+  @Post(':id/attachments')
+  @UseInterceptors(AttachmentUploadGate, FileInterceptor('file', attachmentUploadOptions))
+  sendAttachment(@CurrentUser() user:AuthenticatedUser, @Param('id') id:string, @UploadedFile() file:AttachmentFile|undefined, @Body() dto:AttachmentDto) {
+    return this.attachmentSender.send(user.tenantId,id,file,dto.caption);
   }
 
   @Post(':id/messages')
