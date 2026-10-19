@@ -1,3 +1,4 @@
+import { openImageViewer } from './image-viewer.js?v=23';
 import { createAttachmentPreviews } from './attachment-previews.js?v=22';
 import { createAutoRefresh, mergeRecent } from './auto-refresh.js?v=20';
 import { sortConversations, conversationTime } from './conversation-order.js?v=16';
@@ -190,15 +191,10 @@ async function openMessageMedia(id) {
   if(!message?.media)return;
   const blob=attachmentPreviews.get(id) || await fetchMessageMedia(id);
   if(token!==session.token || conversationId!==session.active?.id)return;
-  const url=URL.createObjectURL(blob);
   if(message.media.kind==='image' && blob.type.startsWith('image/')){
-    const dialog=modal('Imagem da conversa','<img class="message-image-viewer" alt="Imagem da conversa no WhatsApp"><a class="primary media-download">Baixar foto</a>');
-    $('img',dialog).src=url;const link=$('a',dialog);link.href=url;link.download=message.media.fileName;
-    dialog.addEventListener('close',()=>URL.revokeObjectURL(url),{once:true});
-    // Also release when another dialog replaces this one or the page logs out.
-    const observer=new MutationObserver(()=>{if(!dialog.isConnected){URL.revokeObjectURL(url);observer.disconnect();}});
-    observer.observe(document.body,{childList:true});
+    openImageViewer(blob,message.media.fileName);
   }else{
+    const url=URL.createObjectURL(blob);
     const dialog=modal('PDF da conversa','<object class="pdf-viewer" type="application/pdf"><p>Seu navegador não permite a prévia. Use o botão Baixar PDF.</p></object><a class="primary media-download">Baixar PDF</a>');
     $('object',dialog).data=url+'#page=1&view=FitH'; const link=$('a',dialog);link.href=url;link.download=message.media.fileName;
     dialog.addEventListener('close',()=>URL.revokeObjectURL(url),{once:true});
