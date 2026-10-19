@@ -18,6 +18,7 @@ describe('ConversationsService', () => {
         findFirst: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
         findMany: jest.fn(),
       },
       message: { findFirst: jest.fn(), create: jest.fn().mockResolvedValue({ id: 'msg-default' }), findMany: jest.fn() },
@@ -120,7 +121,7 @@ describe('ConversationsService', () => {
 
       expect(prisma.conversation.update).toHaveBeenCalledWith({
         where: { id: 'conv-3' },
-        data: { status: 'OPEN', updatedAt: expect.any(Date) },
+        data: { status: 'OPEN', updatedAt: expect.any(Date), pipelineStage:'QUEUE', replyDueAt:null },
       });
     });
   });
@@ -157,9 +158,9 @@ describe('ConversationsService', () => {
       await service.sendMessage('tenant-1', 'conv-1', 'Ja te ajudo');
 
       expect(evolutionConnector.sendText).toHaveBeenCalled();
-      expect(prisma.conversation.update).toHaveBeenCalledWith({
-        where: { id: 'conv-1' },
-        data: { status: 'PENDING' },
+      expect(prisma.conversation.updateMany).toHaveBeenCalledWith({
+        where: { id: 'conv-1', channel:{tenantId:'tenant-1'},status:{not:'RESOLVED'} },
+        data: { status: 'PENDING',pipelineStage:'IN_SERVICE',replyDueAt:expect.any(Date) },
       });
     });
   });

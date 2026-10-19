@@ -1,3 +1,4 @@
+import { inboundPipeline, trackOutbound } from './pipeline';
 import { MessageMedia, publicMedia } from './message-media';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
@@ -90,7 +91,7 @@ export class ConversationsService {
       });
       const isNewConversation = !conversation;
       if (!conversation) conversation = await tx.conversation.create({ data: { channelId: channel.id, contactId: contact.id, status: 'OPEN' } });
-      else conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { status: 'OPEN', updatedAt: new Date() } });
+      else conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { status: 'OPEN', updatedAt: new Date(), ...inboundPipeline(conversation.assignedUserId) } });
       // Opt-in mode: greet on the first incoming reply even if staff opened the conversation.
       // The default only greets new conversations created by an incoming customer message.
       const welcomeOnFirstReply = (channel.config as any)?.onlyCustomerInitiated === false &&
@@ -113,7 +114,7 @@ export class ConversationsService {
       const stage = candidates.find(s => s.fromStageId && s.fromStageId === conversation!.funnelStage) || candidates.find(s => !s.fromStageId);
       let reply: string | null = null;
       let departmentId: string | null | undefined;
-      const pending = conversation.pendingAutomation as { message: string; departmentId: string } | null;
+      const pending = conversation.pendingAutomation as { message: string; departmentId: string; pipelineStage?:string } | null;
       if (conversation.assignedUserId || conversation.automationCompleted || optOut || tenant.status !== 'ACTIVE') {
         // Human takeover and completed flows must never restart on numeric replies.
         if (pending && (conversation.assignedUserId || optOut)) conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { pendingAutomation: Prisma.DbNull, automationCompleted: true } });
@@ -122,7 +123,7 @@ export class ConversationsService {
         if (text.trim()) {
           reply = pending.message;
           departmentId = pending.departmentId;
-          conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { pendingAutomation: Prisma.DbNull, automationCompleted: true, assignedUserId: null } });
+          conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { pendingAutomation: Prisma.DbNull, automationCompleted: true, assignedUserId: null, pipelineStage: pending.pipelineStage || 'QUEUE', replyDueAt:null } });
         }
       } else if (!open) {
         if (isNewConversation) { reply = settings.awayMessage || null; if (reply) departmentId = settings.awayDepartmentId; }
@@ -133,11 +134,11 @@ export class ConversationsService {
           const availability = operator?.availability as unknown as AvailabilityDto;
           if (operator && availability?.available !== false && withinHours(availability, settings.timezone)) assignedUserId = operator.id;
         }
-        conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { funnelStage: stage.id, assignedUserId } });
+        conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { funnelStage: stage.id, assignedUserId, pipelineStage: stage.waitForReply ? 'QUEUE' : stage.pipelineStage || (assignedUserId ? 'IN_SERVICE' : 'QUEUE'), replyDueAt:null } });
         reply = stage.message || null;
         if (stage.waitForReply) {
           conversation = await tx.conversation.update({ where: { id: conversation.id }, data: {
-            pendingAutomation: { message: stage.completionMessage || 'Obrigado! Aguarde um atendente.', departmentId: stage.departmentId || '' },
+            pendingAutomation: { message: stage.completionMessage || 'Obrigado! Aguarde um atendente.', departmentId: stage.departmentId || '', pipelineStage:stage.pipelineStage || 'QUEUE' },
             departmentId: null,
           } });
         } else departmentId = stage.departmentId ?? null;
@@ -243,6 +244,8 @@ export class ConversationsService {
       resolvedByName: c.resolvedByName,
       resolvedAt: c.resolvedAt,
       funnelStage: c.funnelStage,
+      pipelineStage:c.pipelineStage,
+      replyDueAt:c.replyDueAt,
       departmentId: c.departmentId,
       contact: { id: c.contact.id, waId: c.contact.waId, name: c.contact.name },
       channel: c.channel,
@@ -269,12 +272,13 @@ export class ConversationsService {
       if (!conversation) throw new NotFoundException('Conversa nao encontrada.');
       const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
       if (departmentId && !(tenant.workspaceSettings as any)?.departments?.some((d: { id: string }) => d.id === departmentId)) throw new NotFoundException('Setor nao encontrado.');
-      return tx.conversation.update({ where: { id }, data: { departmentId, assignedUserId: null } });
+      return tx.conversation.update({ where: { id }, data: { departmentId, assignedUserId: null, pipelineStage:'QUEUE', replyDueAt:null } });
     });
   }
 
   async assign(tenantId: string, conversationId: string, userId: string) {
-    await this.findOwnedConversation(tenantId, conversationId);
+    const owned=await this.findOwnedConversation(tenantId, conversationId);
+    if(owned.status==='RESOLVED') throw new ForbiddenException('Atendimento finalizado. Inicie uma nova conversa.');
 
     const user = await this.prisma.user.findFirst({ where: { id: userId, tenantId } });
     if (!user) {
@@ -283,7 +287,7 @@ export class ConversationsService {
 
     const updated = await this.prisma.conversation.update({
       where: { id: conversationId },
-      data: { assignedUserId: userId },
+      data: { assignedUserId: userId, pipelineStage:'IN_SERVICE', replyDueAt:null },
     });
 
     this.outboundWebhooks
@@ -301,7 +305,7 @@ export class ConversationsService {
     const actor = actorId ? await this.prisma.user.findFirst({ where: { id: actorId, tenantId } }) : null;
     return this.prisma.$transaction(async tx => {
       const updated = await tx.conversation.update({ where: { id: conversationId }, data: {
-        status, ...(status === 'RESOLVED' ? { resolvedById: actor?.id || null, resolvedByName: actor?.name || null, resolvedAt: new Date() } : {}),
+        status, pipelineStage:status==='RESOLVED'?'RESOLVED':status==='PENDING'?'WAITING':'QUEUE',replyDueAt:null, ...(status === 'RESOLVED' ? { resolvedById: actor?.id || null, resolvedByName: actor?.name || null, resolvedAt: new Date() } : {}),
       } });
       await tx.auditEvent.create({ data: { tenantId, actorId: actor?.id, action: `conversation.${status.toLowerCase()}:${conversationId}` } });
       return updated;
@@ -359,9 +363,11 @@ export class ConversationsService {
     });
   }
 
-  async sendTemplate(tenantId: string, conversationId: string, dto: TemplateMessageDto) {
+  async sendTemplate(tenantId: string, conversationId: string, dto: TemplateMessageDto, trackReply = true) {
+    const startedAt=new Date();
     const conversation = await this.prisma.conversation.findFirst({ where: { id: conversationId, channel: { tenantId } }, include: { channel: true, contact: true } });
     if (!conversation) throw new NotFoundException('Conversa nao encontrada.');
+    if(conversation.status==='RESOLVED') throw new ForbiddenException('Atendimento finalizado. Inicie uma nova conversa.');
     if (conversation.channel.type !== 'OFFICIAL_META') throw new ForbiddenException('Templates sao exclusivos da Meta.');
     const result = await this.metaConnector.sendTemplate(conversation.channel, conversation.contact.waId, dto);
     const message = await this.prisma.message.create({ data: {
@@ -369,11 +375,12 @@ export class ConversationsService {
       fromNumber: conversation.channel.externalId || '', toNumber: conversation.contact.waId,
       body: `[Template: ${dto.name} (${dto.language})]${dto.parameters.length ? ' ' + dto.parameters.join(' | ') : ''}`, status: 'SENT',
     } });
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { status: 'PENDING' } });
+    if(trackReply) await this.prisma.$transaction(tx=>trackOutbound(tx,tenantId,conversationId,startedAt));
     return message;
   }
 
-  async sendMessage(tenantId: string, conversationId: string, text: string) {
+  async sendMessage(tenantId: string, conversationId: string, text: string, trackReply = true) {
+    const startedAt=new Date();
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: conversationId, channel: { tenantId } },
       include: { channel: true, contact: true },
@@ -382,6 +389,7 @@ export class ConversationsService {
       throw new NotFoundException('Conversa nao encontrada.');
     }
 
+    if(conversation.status==='RESOLVED') throw new ForbiddenException('Atendimento finalizado. Inicie uma nova conversa.');
     if (conversation.channel.type === 'OFFICIAL_META') {
       const recent = await this.prisma.message.findFirst({ where: { conversationId, direction: 'INBOUND', createdAt: { gt: new Date(Date.now() - 24 * 3600000) } } });
       if (!recent) throw new ForbiddenException('Fora da janela de atendimento da Meta. Envie um template aprovado ou aguarde uma mensagem do cliente.');
@@ -406,10 +414,7 @@ export class ConversationsService {
     });
 
     // Toda resposta do agente joga a conversa pra "aguardando o cliente"
-    await this.prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { status: 'PENDING' },
-    });
+    if(trackReply) await this.prisma.$transaction(tx=>trackOutbound(tx,tenantId,conversationId,startedAt));
 
     return message;
   }

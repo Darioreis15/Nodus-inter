@@ -129,15 +129,15 @@ describe('Inbound routing and names', () => {
     let state:any={id:'conv',status:'OPEN',funnelStage:null,assignedUserId:null,automationCompleted:false,pendingAutomation:null};
     db.conversation.findFirst.mockImplementation(async()=>state);
     db.conversation.update.mockImplementation(async({data}:any)=>(state={...state,...data}));
-    db.tenant.findUniqueOrThrow.mockResolvedValue({status:'ACTIVE',workspaceSettings:{timezone:'UTC',businessHours:{enabled:false},departments:[{id:'finance',name:'Financeiro'}],stages:[{...stage,keyword:'1',message:'Qual sua dúvida?',waitForReply:true,completionMessage:'Aguarde o Financeiro.',departmentId:'finance'}]}});
+    db.tenant.findUniqueOrThrow.mockResolvedValue({status:'ACTIVE',workspaceSettings:{timezone:'UTC',businessHours:{enabled:false},departments:[{id:'finance',name:'Financeiro'}],stages:[{...stage,keyword:'1',message:'Qual sua dúvida?',waitForReply:true,completionMessage:'Aguarde o Financeiro.',departmentId:'finance',pipelineStage:'WAITING'}]}});
     await service.recordInboundMessage(channel,'5511999999999','1','first',{});
-    expect(state.pendingAutomation).toEqual({message:'Aguarde o Financeiro.',departmentId:'finance'});
+    expect(state.pendingAutomation).toEqual({message:'Aguarde o Financeiro.',departmentId:'finance',pipelineStage:'WAITING'});
     expect(state.departmentId).toBeNull();expect(state.assignedUserId).toBeNull();
     expect(evo.sendText).toHaveBeenLastCalledWith(channel,{to:'5511999999999',text:'Qual sua dúvida?'});
     await service.recordInboundMessage(channel,'5511999999999','','media',{});
     expect(evo.sendText).toHaveBeenCalledTimes(1);
     await service.recordInboundMessage(channel,'5511999999999','Preciso do boleto','second',{});
-    expect(state.departmentId).toBe('finance');expect(state.automationCompleted).toBe(true);expect(state.assignedUserId).toBeNull();
+    expect(state.pipelineStage).toBe('WAITING');expect(state.replyDueAt).toBeNull();expect(state.departmentId).toBe('finance');expect(state.automationCompleted).toBe(true);expect(state.assignedUserId).toBeNull();
     expect(evo.sendText).toHaveBeenLastCalledWith(channel,{to:'5511999999999',text:'Aguarde o Financeiro.'});
     await service.recordInboundMessage(channel,'5511999999999','1','third',{});
     expect(evo.sendText).toHaveBeenCalledTimes(2);
@@ -158,12 +158,12 @@ describe('Inbound routing and names', () => {
     await service.recordInboundMessage(channel,'5511999999999',' SALES ','external',{},'Maria');
     expect(db.contact.upsert).toHaveBeenCalledWith(expect.objectContaining({create:expect.objectContaining({name:'Maria'})}));
     expect(db.contact.updateMany).toHaveBeenCalledWith({where:{id:'contact',name:null},data:{name:'Maria'}});
-    expect(db.conversation.update).toHaveBeenCalledWith({where:{id:'conv'},data:{funnelStage:'stage',assignedUserId:'operator'}});
+    expect(db.conversation.update).toHaveBeenCalledWith({where:{id:'conv'},data:{funnelStage:'stage',assignedUserId:'operator',pipelineStage:'IN_SERVICE',replyDueAt:null}});
     expect(evo.sendText).toHaveBeenCalledWith(channel,{to:'5511999999999',text:stage.message});
   });
   it('keeps a routed conversation in the queue when the operator is unavailable',async()=>{
     const {db,service}=setup(false);await service.recordInboundMessage(channel,'5511999999999','sales','external',{});
-    expect(db.conversation.update).toHaveBeenCalledWith({where:{id:'conv'},data:{funnelStage:'stage',assignedUserId:null}});
+    expect(db.conversation.update).toHaveBeenCalledWith({where:{id:'conv'},data:{funnelStage:'stage',assignedUserId:null,pipelineStage:'QUEUE',replyDueAt:null}});
   });
   it('sends away response outside hours instead of welcome or stage messages',async()=>{
     const {db,evo,service}=setup(true,{enabled:true,days:[],start:'08:00',end:'18:00'});
@@ -177,7 +177,7 @@ describe('Inbound routing and names', () => {
     db.conversation.update.mockImplementation(async ({data}:any)=>(state={...state,...data}));
     db.tenant.findUniqueOrThrow.mockResolvedValue({status:'ACTIVE',workspaceSettings:{timezone:'UTC',businessHours:{enabled:false},stages:[{...stage,id:'global',keyword:'1'},{...stage,id:'final',keyword:'1',fromStageId:'initial',departmentId:'finance'}],departments:[{id:'finance',name:'Financeiro'}]}});
     await service.recordInboundMessage(channel,'5511999999999','1','external',{});
-    expect(db.conversation.update).toHaveBeenCalledWith({where:{id:'conv'},data:{funnelStage:'final',assignedUserId:'operator'}});
+    expect(db.conversation.update).toHaveBeenCalledWith({where:{id:'conv'},data:{funnelStage:'final',assignedUserId:'operator',pipelineStage:'IN_SERVICE',replyDueAt:null}});
     expect(db.conversation.update).toHaveBeenCalledWith({where:{id:'conv'},data:{departmentId:'finance'}});
   });
   it('records an opt-out, stops all queued campaigns and avoids an automated reply',async()=>{

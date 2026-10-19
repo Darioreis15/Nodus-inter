@@ -1,3 +1,4 @@
+import { trackOutbound } from './pipeline';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, PayloadTooLargeException, UnsupportedMediaTypeException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,8 +11,10 @@ import { MEDIA_MAX_BYTES, mediaMetadata, publicMedia, validMediaBytes } from './
 export class AttachmentSendService {
   constructor(private prisma:PrismaService, private evolution:EvolutionConnector, private meta:MetaConnector) {}
   async send(tenantId:string, conversationId:string, file:AttachmentFile|undefined, caption = '') {
+    const startedAt=new Date();
     const conversation = await this.prisma.conversation.findFirst({where:{id:conversationId,channel:{tenantId}},include:{channel:true,contact:true}});
     if (!conversation) throw new NotFoundException('Conversa nao encontrada.');
+    if(conversation.status==='RESOLVED') throw new ForbiddenException('Atendimento finalizado. Inicie uma nova conversa.');
     if (!file?.buffer?.length) throw new BadRequestException('Selecione um arquivo para enviar.');
     if (file.buffer.length > MEDIA_MAX_BYTES) throw new PayloadTooLargeException('Arquivo excede o limite de 10 MB.');
     const media = mediaMetadata(file.mimetype,file.originalname,undefined,file.buffer.length);
@@ -35,7 +38,7 @@ export class AttachmentSendService {
       const existing = await tx.message.findFirst({where:{externalId:result.externalId,conversation:{channelId:channel.id},direction:'OUTBOUND'}});
       const data = {conversationId,direction:'OUTBOUND' as const,externalId:result.externalId,fromNumber:channel.externalId || '',toNumber:conversation.contact.waId,body:caption,media:storedMedia as unknown as Prisma.InputJsonValue};
       const message = existing ? await tx.message.update({where:{id:existing.id},data}) : await tx.message.create({data:{...data,status:'SENT'}});
-      await tx.conversation.update({where:{id:conversationId},data:{status:'PENDING'}});
+      await trackOutbound(tx,tenantId,conversationId,startedAt);
       return message;
     });
     return {id:saved.id,conversationId,direction:saved.direction,body:saved.body,status:saved.status,createdAt:saved.createdAt,fromNumber:saved.fromNumber,toNumber:saved.toNumber,media:publicMedia(saved.media)};

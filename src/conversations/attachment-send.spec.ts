@@ -8,7 +8,7 @@ describe('Envio de anexos',()=>{
   let prisma:any, evolution:any, meta:any, service:AttachmentSendService, conversation:any;
   beforeEach(()=>{
     conversation={id:'c',channel:{id:'ch',tenantId:'t',type:'QR_EVOLUTION',status:'CONNECTED',externalId:'instance'},contact:{waId:'5511999999999'}};
-    prisma={conversation:{findFirst:jest.fn().mockResolvedValue(conversation),update:jest.fn()},message:{findFirst:jest.fn().mockResolvedValue(null),create:jest.fn(async({data})=>({id:'m',...data})),update:jest.fn(async({data})=>({id:'existing',status:'READ',...data}))},$queryRaw:jest.fn()};
+    prisma={tenant:{findUniqueOrThrow:jest.fn().mockResolvedValue({workspaceSettings:{}})},conversation:{findFirst:jest.fn().mockResolvedValue(conversation),update:jest.fn(),updateMany:jest.fn()},message:{findFirst:jest.fn().mockResolvedValue(null),create:jest.fn(async({data})=>({id:'m',...data})),update:jest.fn(async({data})=>({id:'existing',status:'READ',...data}))},$queryRaw:jest.fn()};
     prisma.$transaction=jest.fn(fn=>fn(prisma));
     evolution={sendMedia:jest.fn().mockResolvedValue({externalId:'remote'})};meta={sendMedia:jest.fn().mockResolvedValue({externalId:'wamid',providerId:'123'})};
     service=new AttachmentSendService(prisma,evolution,meta);
@@ -29,7 +29,7 @@ describe('Envio de anexos',()=>{
     const result=await service.send('t','c',pdf,'Segue boleto');
     expect(result).toMatchObject({id:'m',body:'Segue boleto',media:{kind:'document',fileName:'boleto.pdf'},status:'SENT'});
     expect(prisma.message.create.mock.calls[0][0].data).not.toHaveProperty('buffer');
-    expect(prisma.conversation.update).toHaveBeenCalledWith({where:{id:'c'},data:{status:'PENDING'}});
+    expect(prisma.conversation.updateMany).toHaveBeenCalledWith({where:{id:'c',channel:{tenantId:'t'},status:{not:'RESOLVED'}},data:{status:'PENDING',pipelineStage:'IN_SERVICE',replyDueAt:expect.any(Date)}});
   });
   it('deduplica eco que chegou antes da resposta e preserva READ',async()=>{
     prisma.message.findFirst.mockResolvedValue({id:'existing',status:'READ'});

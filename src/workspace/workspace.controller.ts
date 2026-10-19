@@ -39,7 +39,9 @@ export class WorkspaceController {
         await tx.conversation.updateMany({ where: { channel: { tenantId: user.tenantId }, departmentId: { in: removed } }, data: { departmentId: null } });
         await tx.channel.updateMany({ where: { tenantId: user.tenantId, autoReplyDepartmentId: { in: removed } }, data: { autoReplyDepartmentId: null } });
       }
-      const result = { ...dto, departments, awayDepartmentId };
+      const pipeline = dto.pipeline ?? saved.pipeline ?? defaults.pipeline;
+      if (!pipeline.enabled) await tx.conversation.updateMany({where:{channel:{tenantId:user.tenantId},replyDueAt:{not:null}},data:{replyDueAt:null}});
+      const result = { ...dto, departments, awayDepartmentId, pipeline };
       const ids = [...new Set(dto.stages.map(s => s.userId).filter(Boolean))] as string[];
       const count = await tx.user.count({ where: { tenantId: user.tenantId, id: { in: ids } } });
       if (count !== ids.length) throw new BadRequestException('Operador de outra empresa ou inexistente.');

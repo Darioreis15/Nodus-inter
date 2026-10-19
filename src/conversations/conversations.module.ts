@@ -1,3 +1,4 @@
+import { PipelineWorker, PipelineRunController } from './pipeline-worker';
 import { ConversationNotesController, ConversationNotesService } from './conversation-notes';
 import { MessageMediaService } from './message-media.service';
 import { AttachmentSendService } from './attachment-send.service';
@@ -12,8 +13,8 @@ import { ContactsService } from './contacts.service';
 
 @Module({
   imports: [ChannelsModule, OutboundWebhooksModule],
-  controllers: [ConversationsController, ConversationNotesController],
-  providers: [ConversationNotesService, AttachmentUploadGate, AttachmentSendService, MessageMediaService, ConversationsService, ContactsService, ContactPhotosService],
+  controllers: [PipelineRunController, ConversationsController, ConversationNotesController],
+  providers: [PipelineWorker, ConversationNotesService, AttachmentUploadGate, AttachmentSendService, MessageMediaService, ConversationsService, ContactsService, ContactPhotosService],
   exports: [ConversationsService],
 })
 export class ConversationsModule {}

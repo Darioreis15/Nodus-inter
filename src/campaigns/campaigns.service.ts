@@ -164,7 +164,7 @@ export class CampaignsService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       const p = job.payload as CampaignStepDto;
-      const message = p.type === 'TEMPLATE' ? await this.conversations.sendTemplate(tenantId,conversation.id,p.template!) : await this.conversations.sendMessage(tenantId,conversation.id,p.text!);
+      const message = p.type === 'TEMPLATE' ? await this.conversations.sendTemplate(tenantId,conversation.id,p.template!,false) : await this.conversations.sendMessage(tenantId,conversation.id,p.text!,false);
       await this.prisma.campaignDelivery.update({where:{id:job.id},data:{status:'SENT',messageId:message.id,payload:{},finishedAt:new Date()}});
     } catch (error) {
       const response = (error as any)?.getResponse?.();
