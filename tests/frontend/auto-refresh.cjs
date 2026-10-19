@@ -1,0 +1,26 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+(async () => {
+ const {mergeRecent,createAutoRefresh}=await import('data:text/javascript;base64,'+Buffer.from(fs.readFileSync('frontend/auto-refresh.js','utf8')).toString('base64'));
+ const row=(id,t)=>({id,createdAt:new Date(t*1000).toISOString()});
+ const time=r=>r.createdAt;
+ assert.deepEqual(mergeRecent([row('old',1),row('a',3)],[row('b',5),row('a',3)],2,time).map(r=>r.id),['b','a','old']);
+ assert.deepEqual(mergeRecent([row('deleted',4),row('old',1)],[row('b',5),row('a',3)],2,time).map(r=>r.id),['b','a','old']);
+ assert.deepEqual(mergeRecent([row('deleted',4)],[],100,time),[]);
+ assert.deepEqual(mergeRecent([row('a',1)],[row('a',2)],100,time).map(r=>r.createdAt),[row('a',2).createdAt]);
+ assert.deepEqual(mergeRecent([row('a',1),row('b',1)],[row('b',1),row('a',1)],100,time).map(r=>r.id),['b','a']);
+ let now=0, queued, enabled=true, calls=0, errors=0, resolve;
+ let task=async()=>{calls++};
+ const sync=createAutoRefresh({enabled:()=>enabled,refresh:()=>task(),onError:()=>errors++,clock:()=>now,schedule:(fn,delay)=>{queued={fn,delay};return 1},cancel:()=>{queued=null}});
+ sync.start(); assert.equal(queued.delay,5000);
+ enabled=false; await queued.fn(); assert.equal(calls,0);
+ enabled=true; task=()=>{calls++;return new Promise(r=>resolve=r)};
+ const pending=queued.fn();sync.wake();assert.equal(calls,1); resolve();await pending;
+ task=async()=>{calls++;throw Object.assign(new Error('rate limit'),{retryAfter:60})};
+ await queued.fn();assert.equal(errors,1);assert.equal(queued.delay,60000);
+ sync.wake();assert.equal(queued.delay,60000);
+ now+=60000;await queued.fn();assert.equal(errors,1);
+ now+=60000;task=async()=>{calls++};await queued.fn();assert.equal(queued.delay,5000);
+ sync.stop();assert.equal(queued,null);
+ console.log('PASS: merges, deletion, older history, status update, ordering, pause, non-overlap, retry/backoff and stop.');
+})().catch(e=>{console.error(e);process.exitCode=1});
