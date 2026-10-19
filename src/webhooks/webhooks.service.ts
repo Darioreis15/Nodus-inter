@@ -51,7 +51,14 @@ export class WebhooksService {
       if (isGroup && (channel.config as any)?.receiveGroupMessages === false) return { ok: true };
       const fromMe = raw?.key?.fromMe;
       if (fromMe) {
-        return { ok: true }; // eco da propria mensagem que a gente mandou, ignora
+        const { text, media } = evolutionContent(raw);
+        const jid = String(raw?.key?.remoteJid ?? '');
+        const externalId = raw?.key?.id;
+        // Ignore status broadcasts, malformed destinations and text echoes.
+        if (media && /^(\d+)@(s\.whatsapp\.net|lid|g\.us)$/.test(jid) && typeof externalId === 'string' && externalId.length > 0 && externalId.length <= 512) {
+          await this.conversations.recordOutboundAttachment(channel, jid.split('@')[0], text, externalId, media);
+        }
+        return { ok: true };
       }
 
       const { text, media } = evolutionContent(raw);

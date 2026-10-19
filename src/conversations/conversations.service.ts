@@ -33,6 +33,20 @@ export class ConversationsService {
     return channelType === 'QR_EVOLUTION' ? this.evolutionConnector : this.metaConnector;
   }
 
+  // Import outgoing attachment echoes from Evolution; never run inbound automation.
+  async recordOutboundAttachment(channel: {id:string; tenantId:string; externalId:string|null}, toNumber:string, text:string, externalId:string, media:MessageMedia) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${channel.tenantId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM channels WHERE id = ${channel.id} FOR UPDATE`;
+      const existing = await tx.message.findFirst({where:{externalId, conversation:{channelId:channel.id}}});
+      if (existing) return existing;
+      const contact = await tx.contact.upsert({where:{tenantId_waId:{tenantId:channel.tenantId,waId:toNumber}},create:{tenantId:channel.tenantId,waId:toNumber},update:{}});
+      let conversation = await tx.conversation.findFirst({where:{channelId:channel.id,contactId:contact.id,status:{in:['OPEN','PENDING']}},orderBy:{updatedAt:'desc'}});
+      if (!conversation) conversation = await tx.conversation.create({data:{channelId:channel.id,contactId:contact.id,status:'OPEN'}});
+      return tx.message.create({data:{conversationId:conversation.id,direction:'OUTBOUND',externalId,fromNumber:channel.externalId || '',toNumber,body:text,status:'SENT',media:media as unknown as Prisma.InputJsonValue}});
+    });
+  }
+
   /**
    * Usado pelo WebhooksService quando chega mensagem nova: acha (ou cria) o
    * contato e reaproveita uma conversa ainda aberta/pendente com ele nesse

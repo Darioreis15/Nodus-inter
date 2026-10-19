@@ -1,3 +1,4 @@
+import { createAttachmentPreviews } from './attachment-previews.js?v=21';
 import { createAutoRefresh, mergeRecent } from './auto-refresh.js?v=20';
 import { sortConversations, conversationTime } from './conversation-order.js?v=16';
 import { createCampaignContacts, mergeCampaignRecipients } from './campaign-contacts.js?v=15';
@@ -25,6 +26,7 @@ const contactPhotos = createContactPhotos(async (id, signal) => {
   if (!response.ok || session.token !== token) return null;
   return (await response.json()).url;
 });
+const attachmentPreviews = createAttachmentPreviews({ load: fetchMessageMedia });
 function contactAvatar(c) {
   const initials = (c.contact.name || c.contact.waId || '?').trim().split(/\s+/).slice(0,2).map(part => part[0]).join('').toUpperCase();
   return `<div class="avatar contact-avatar"${c.channel.type === 'QR_EVOLUTION' ? ` data-contact-photo="${escape(c.id)}"` : ''}>${escape(initials)}</div>`;
@@ -102,7 +104,7 @@ function renderShell() {
   $('#logout').onclick = () => logout(true);
   $('#more-conversations').onclick = e => busy(e.currentTarget, () => loadConversations(session.filter, true));
 }
-function emptyChat() { $('#chat').className = 'chat empty'; $('#chat').innerHTML = '<div><div class="empty-mark">∞</div><h2>Selecione uma conversa</h2><p>Escolha um atendimento ou inicie uma nova conversa.</p></div>'; }
+function emptyChat() { attachmentPreviews.clear(); $('#chat').className = 'chat empty'; $('#chat').innerHTML = '<div><div class="empty-mark">∞</div><h2>Selecione uma conversa</h2><p>Escolha um atendimento ou inicie uma nova conversa.</p></div>'; }
 function drawList(query = $('#search')?.value || '') {
   const list = $('#conversation-list'); if (!list) return;
   const matches = sortConversations(session.conversations).filter(c => `${c.contact.name || ''} ${c.contact.waId} ${c.lastMessage?.body || ''}`.toLowerCase().includes(query.toLowerCase()));
@@ -127,6 +129,7 @@ async function loadConversations(status = 'OPEN', more = false) {
 }
 async function openConversation(id) {
   const c = session.conversations.find(c => c.id === id); if (!c) return;
+  attachmentPreviews.clear();
   session.page = null; session.active = c; const generation = ++session.generation;
   drawList(); const chat = $('#chat'); chat.className = 'chat mobile-open';
   chat.innerHTML = `<header class="chat-header"><button class="icon-btn mobile-back" aria-label="Voltar às conversas">←</button>${contactAvatar(c)}<div><h2>${escape(c.contact.name || c.contact.waId)}</h2><p>${escape(c.contact.waId)} · ${escape(c.channel.name)}</p></div><div class="chat-actions"><button class="outline" id="rename-contact">Nome</button><button class="outline" id="transfer-department">Setor</button><button class="outline" id="assign">Assumir</button><button class="resolve" id="resolve">Resolver ✓</button>${c.channel.type === 'QR_EVOLUTION' ? '<button class="danger outline" id="delete-conversation">Excluir</button>' : '<button class="outline" id="send-template">Template</button>'}</div></header><button class="text-button" id="older-messages" hidden>Carregar mensagens anteriores</button><div id="messages" class="messages"><p class="loading">Carregando…</p></div><form id="message-form" class="composer"><textarea name="text" rows="2" maxlength="4000" placeholder="Escreva uma mensagem" aria-label="Mensagem" required></textarea><button class="send" type="submit" aria-label="Enviar mensagem">➜</button></form>`;
@@ -155,28 +158,50 @@ async function openConversation(id) {
 }
 function drawMessages(bottom = true) {
   const el = $('#messages'); if (!el) return;
-  el.innerHTML = session.messages.length ? [...session.messages].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id.localeCompare(b.id)).map(m => `<div class="message ${m.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}">${m.media ? `<button type="button" class="message-attachment" data-media-id="${escape(m.id)}">${m.media.kind === 'image' ? '📷 Ver foto' : '📄 Baixar PDF'}<small>${escape(m.media.fileName)}</small></button>` : ''}${m.body ? `<p>${escape(m.body)}</p>` : ''}<time>${escape(date(m.createdAt))} · <span class="message-receipt ${m.status === 'READ' && m.direction === 'OUTBOUND' ? 'is-read' : ''}">${m.direction === 'OUTBOUND' ? m.status === 'READ' || m.status === 'DELIVERED' ? '✓✓ ' : m.status === 'SENT' ? '✓ ' : '' : ''}${escape(labels[m.status] || m.status)}</span></time></div>`).join('') : '<p class="no-results">Escreva a primeira mensagem para iniciar o atendimento.</p>';
+  const oldNodes = new Map([...el.querySelectorAll('[data-message-id]')].map(node => [node.dataset.messageId, node]));
+  const fragment = document.createElement('div');
+  fragment.innerHTML = session.messages.length ? [...session.messages].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id.localeCompare(b.id)).map(m => `<div data-message-id="${escape(m.id)}" class="message ${m.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}">${m.media ? `<div class="attachment-preview ${m.media.kind === 'image' ? 'preview-image' : 'preview-pdf'}" data-preview-id="${escape(m.id)}">Carregando prévia…</div><button type="button" class="message-attachment" data-media-id="${escape(m.id)}">${m.media.kind === 'image' ? '📷 Ampliar foto' : '📄 Abrir ou baixar PDF'}<small>${escape(m.media.fileName)}</small></button>` : ''}${m.body ? `<p>${escape(m.body)}</p>` : ''}<time>${escape(date(m.createdAt))} · <span class="message-receipt ${m.status === 'READ' && m.direction === 'OUTBOUND' ? 'is-read' : ''}">${m.direction === 'OUTBOUND' ? m.status === 'READ' || m.status === 'DELIVERED' ? '✓✓ ' : m.status === 'SENT' ? '✓ ' : '' : ''}${escape(labels[m.status] || m.status)}</span></time></div>`).join('') : '<p class="no-results">Escreva a primeira mensagem para iniciar o atendimento.</p>';
+  const nextNodes = [...fragment.children].map(node => {
+    const id = node.dataset.messageId, message = session.messages.find(m => m.id === id);
+    const signature = message && JSON.stringify([message.body, message.media, message.direction]);
+    const old = oldNodes.get(id);
+    if (old && old._contentSignature === signature) { old.querySelector('time').innerHTML = node.querySelector('time').innerHTML; return old; }
+    node._contentSignature = signature; return node;
+  });
+  const keep = new Set(nextNodes); [...el.children].forEach(node => { if (!keep.has(node)) node.remove(); });
+  nextNodes.forEach((node, index) => { if (el.children[index] !== node) el.insertBefore(node, el.children[index] || null); });
+  attachmentPreviews.observe(el);
   $$('[data-media-id]', el).forEach(button => button.onclick = () => busy(button, () => openMessageMedia(button.dataset.mediaId)));
   if (bottom) el.scrollTop = el.scrollHeight;
 }
-async function openMessageMedia(id) {
+async function fetchMessageMedia(id, signal) {
   const message=session.messages.find(m=>m.id===id), conversationId=session.active?.id, token=session.token;
-  if(!message?.media || !conversationId || !token)return;
-  const response=await fetch(`${API_URL}/conversations/${encoded(conversationId)}/messages/${encoded(id)}/media`, {headers:{Authorization:`Bearer ${token}`},cache:'no-store',signal:AbortSignal.timeout(45000)});
-  if(!response.ok){const data=await response.json().catch(()=>({}));if(response.status===401)logout(false);throw new Error(data.message || 'Não foi possível abrir o anexo.');}
+  if(!message?.media || !conversationId || !token)throw new Error('Conversa indisponível.');
+  const response=await fetch(`${API_URL}/conversations/${encoded(conversationId)}/messages/${encoded(id)}/media`, {headers:{Authorization:`Bearer ${token}`},cache:'no-store',signal:signal ? AbortSignal.any([signal, AbortSignal.timeout(45000)]) : AbortSignal.timeout(45000)});
+  if(!response.ok){const data=await response.json().catch(()=>({}));if(response.status===401 && session.token===token)logout(false);throw new Error(data.message || 'Não foi possível abrir o anexo.');}
   const blob=await response.blob();
-  if(session.token!==token || session.active?.id!==conversationId || session.page)return;
+  if(session.token!==token || session.active?.id!==conversationId || session.page)throw new Error('Conversa alterada.');
   if(blob.size>10*1024*1024 || !['image/jpeg','image/png','image/webp','application/pdf'].includes(blob.type))throw new Error('Formato ou tamanho do arquivo não permitido.');
+  return blob;
+}
+async function openMessageMedia(id) {
+  const message=session.messages.find(m=>m.id===id), token=session.token, conversationId=session.active?.id;
+  if(!message?.media)return;
+  const blob=attachmentPreviews.get(id) || await fetchMessageMedia(id);
+  if(token!==session.token || conversationId!==session.active?.id)return;
   const url=URL.createObjectURL(blob);
   if(message.media.kind==='image' && blob.type.startsWith('image/')){
-    const dialog=modal('Foto recebida','<img class="message-image-viewer" alt="Foto recebida pelo WhatsApp"><a class="primary media-download">Baixar foto</a>');
+    const dialog=modal('Imagem da conversa','<img class="message-image-viewer" alt="Imagem da conversa no WhatsApp"><a class="primary media-download">Baixar foto</a>');
     $('img',dialog).src=url;const link=$('a',dialog);link.href=url;link.download=message.media.fileName;
     dialog.addEventListener('close',()=>URL.revokeObjectURL(url),{once:true});
     // Also release when another dialog replaces this one or the page logs out.
     const observer=new MutationObserver(()=>{if(!dialog.isConnected){URL.revokeObjectURL(url);observer.disconnect();}});
     observer.observe(document.body,{childList:true});
   }else{
-    const a=document.createElement('a');a.href=url;a.download=message.media.fileName;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    const dialog=modal('PDF da conversa','<object class="pdf-viewer" type="application/pdf"><p>Seu navegador não permite a prévia. Use o botão Baixar PDF.</p></object><a class="primary media-download">Baixar PDF</a>');
+    $('object',dialog).data=url+'#page=1&view=FitH'; const link=$('a',dialog);link.href=url;link.download=message.media.fileName;
+    dialog.addEventListener('close',()=>URL.revokeObjectURL(url),{once:true});
+    const observer=new MutationObserver(()=>{if(!dialog.isConnected){URL.revokeObjectURL(url);observer.disconnect();}}); observer.observe(document.body,{childList:true});
   }
 }
 async function newConversation() {
@@ -192,6 +217,7 @@ function sendTemplate(c) {
 }
 function openPage(page) {
   if (session.page === page && $('#page-content')) return;
+  attachmentPreviews.clear();
   session.page = page; session.active = null; session.generation++;
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.page === page)); $('.inbox').style.display = 'none';
   const titles = { campaigns:['Campanhas e follow-ups','Envios agendados com acompanhamento por destinatário.'], connections:['Conexões','Gerencie os canais e números da sua empresa.'], settings:['Configurações','Sua conta, aparência, expediente e integrações.'], automations:['Automações','Mensagens automáticas e regras de atendimento.'], users:['Operadores','Acessos e disponibilidade da equipe.'], billing:['Mensalidades','Acompanhe as cobranças da sua empresa no Asaas.'], logs:['Logs de conversas','Identifique quem finalizou cada atendimento.'], funnel:['Funil de atendimento','Organize as conversas por etapa.'], reports:['Relatórios','Indicadores da sua operação.'] };
@@ -571,6 +597,7 @@ async function reportsPage() {
   $('#page-content').innerHTML = `<div class="metrics">${['OPEN','PENDING','RESOLVED'].map(k => `<article><small>${labels[k]}</small><strong>${escape(counts[k] || 0)}</strong></article>`).join('')}<article><small>Primeira resposta média</small><strong>${escape(r.averageFirstResponseMinutes == null ? '—' : `${r.averageFirstResponseMinutes} min`)}</strong></article></div><section class="card"><h2>Chamados finalizados por usuário</h2><p class="muted">Total de conversas atualmente finalizadas, por quem concluiu o atendimento. Não se limita aos últimos 7 dias. Conversas reabertas deixam esta contagem até serem finalizadas novamente.</p>${Array.isArray(r.resolvedByUser) ? (r.resolvedByUser.length ? r.resolvedByUser.map(u => `<div class="data-row"><strong>${escape(u.name)}</strong><span>${escape(u.count)} chamado(s) finalizado(s)</span></div>`).join('') : '<p class="muted">Nenhum chamado finalizado.</p>') : '<p class="muted">Atualize o backend para carregar os chamados por usuário.</p>'}</section><section class="card"><h2>Mensagens nos últimos 7 dias</h2>${(r.messagesLast7Days || []).map(x => `<div class="data-row"><strong>${escape(x.date)}</strong><span>${escape(x.count)} mensagens</span></div>`).join('')}</section>`;
 }
 function logout(revoke = false) {
+  attachmentPreviews.clear();
   contactPhotos.clear();
   if (revoke && session.token) api('/auth/logout-all', { method:'POST', body:'{}' }).catch(() => notice('Você saiu deste navegador, mas não foi possível revogar as outras sessões.'));
   session.token = null; session.user = null; session.tenant = null; session.active = null; session.conversations = []; session.messages = []; session.tabs = {}; $('#modal')?.close(); renderLogin();

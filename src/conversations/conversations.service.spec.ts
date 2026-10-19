@@ -33,6 +33,27 @@ describe('ConversationsService', () => {
     service = new ConversationsService(prisma, contacts, evolutionConnector, metaConnector, outboundWebhooks);
   });
 
+  describe('recordOutboundAttachment', () => {
+    const channel = {id:'channel-1',tenantId:'tenant-1',externalId:'instance'};
+    const media = {kind:'document' as const,mimeType:'application/pdf',fileName:'arquivo.pdf'};
+    it('deduplica por canal sem disparar automacao ou webhook de entrada', async () => {
+      prisma.message.findFirst.mockResolvedValue({id:'existing'});
+      expect(await service.recordOutboundAttachment(channel,'5511999999999','','remote',media)).toEqual({id:'existing'});
+      expect(prisma.message.findFirst).toHaveBeenCalledWith({where:{externalId:'remote',conversation:{channelId:'channel-1'}}});
+      expect(prisma.message.create).not.toHaveBeenCalled();
+      expect(evolutionConnector.sendText).not.toHaveBeenCalled();
+      expect(outboundWebhooks.dispatch).not.toHaveBeenCalled();
+    });
+    it('salva anexo enviado sem criar uma mensagem de entrada', async () => {
+      prisma.message.findFirst.mockResolvedValue(null);
+      prisma.conversation.findFirst.mockResolvedValue({id:'conversation-1'});
+      await service.recordOutboundAttachment(channel,'5511999999999','boleto','remote',media);
+      expect(prisma.message.create).toHaveBeenCalledWith({data:{conversationId:'conversation-1',direction:'OUTBOUND',externalId:'remote',fromNumber:'instance',toNumber:'5511999999999',body:'boleto',status:'SENT',media}});
+      expect(prisma.tenant.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(evolutionConnector.sendText).not.toHaveBeenCalled();
+    });
+  });
+
   describe('recordInboundMessage', () => {
     const channel = {
       id: 'channel-1',
