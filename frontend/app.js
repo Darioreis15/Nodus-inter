@@ -1,3 +1,4 @@
+import { openImageViewer } from './image-viewer.js?v=23';
 import { createAttachmentPreviews } from './attachment-previews.js?v=22';
 import { createAutoRefresh, mergeRecent } from './auto-refresh.js?v=20';
 import { sortConversations, conversationTime } from './conversation-order.js?v=16';
@@ -132,7 +133,7 @@ async function openConversation(id) {
   attachmentPreviews.clear();
   session.page = null; session.active = c; const generation = ++session.generation;
   drawList(); const chat = $('#chat'); chat.className = 'chat mobile-open';
-  chat.innerHTML = `<header class="chat-header"><button class="icon-btn mobile-back" aria-label="Voltar às conversas">←</button>${contactAvatar(c)}<div><h2>${escape(c.contact.name || c.contact.waId)}</h2><p>${escape(c.contact.waId)} · ${escape(c.channel.name)}</p></div><div class="chat-actions"><button class="outline" id="rename-contact">Nome</button><button class="outline" id="transfer-department">Setor</button><button class="outline" id="assign">Assumir</button><button class="resolve" id="resolve">Resolver ✓</button>${c.channel.type === 'QR_EVOLUTION' ? '<button class="danger outline" id="delete-conversation">Excluir</button>' : '<button class="outline" id="send-template">Template</button>'}</div></header><button class="text-button" id="older-messages" hidden>Carregar mensagens anteriores</button><div id="messages" class="messages"><p class="loading">Carregando…</p></div><form id="message-form" class="composer"><button type="button" class="outline attach-button" id="attach-file" aria-label="Anexar foto ou PDF" title="Anexar foto ou PDF">📎</button><textarea name="text" rows="2" maxlength="4000" placeholder="Escreva uma mensagem" aria-label="Mensagem" required></textarea><button class="send" type="submit" aria-label="Enviar mensagem">➜</button></form>`;
+  chat.innerHTML = `<header class="chat-header"><button class="icon-btn mobile-back" aria-label="Voltar às conversas">←</button>${contactAvatar(c)}<div><h2>${escape(c.contact.name || c.contact.waId)}</h2><p>${escape(c.contact.waId)} · ${escape(c.channel.name)}</p></div><div class="chat-actions"><button class="outline" id="conversation-notes">Observações</button><button class="outline" id="rename-contact">Nome</button><button class="outline" id="transfer-department">Setor</button><button class="outline" id="assign">Assumir</button><button class="resolve" id="resolve">Resolver ✓</button>${c.channel.type === 'QR_EVOLUTION' ? '<button class="danger outline" id="delete-conversation">Excluir</button>' : '<button class="outline" id="send-template">Template</button>'}</div></header><button class="text-button" id="older-messages" hidden>Carregar mensagens anteriores</button><div id="messages" class="messages"><p class="loading">Carregando…</p></div><form id="message-form" class="composer"><button type="button" class="outline attach-button" id="attach-file" aria-label="Anexar foto ou PDF" title="Anexar foto ou PDF">📎</button><textarea name="text" rows="2" maxlength="4000" placeholder="Escreva uma mensagem" aria-label="Mensagem" required></textarea><button class="send" type="submit" aria-label="Enviar mensagem">➜</button></form>`;
   $('.mobile-back').onclick = () => { chat.classList.remove('mobile-open'); };
   $('#transfer-department').onclick = async () => { const w = await api('/workspace'); modal('Encaminhar para setor', `<form id="transfer-form"><label>Setor<select name="departmentId">${departmentOptions(w.departments || [],c.departmentId)}</select></label><p>A transferência libera o atendente atual e mantém a conversa na fila.</p><button class="primary">Encaminhar</button></form>`); bindForm('#transfer-form', async data => { await api(`/conversations/${encoded(id)}/department`, { method:'PATCH', body:body({ departmentId:data.departmentId || null }) }); $('#modal').close(); await loadConversations(session.filter); }); };
   $('#assign').onclick = e => busy(e.currentTarget, async () => { await api(`/conversations/${encoded(id)}/assign`, { method:'PATCH', body:'{}' }); notice('Atendimento atribuído a você.'); });
@@ -147,6 +148,7 @@ async function openConversation(id) {
     if (session.active?.id !== id) return;
     session.messages = [...session.messages, sent]; drawMessages(); form.reset(); c.lastMessage = sent; drawList();
   });
+  $('#conversation-notes').onclick = () => openConversationNotes(id);
   $('#attach-file').onclick = () => attachFile(c);
   $('#older-messages').onclick = e => busy(e.currentTarget, async () => {
     const oldest = [...session.messages].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id.localeCompare(b.id))[0];
@@ -161,7 +163,7 @@ function drawMessages(bottom = true) {
   const el = $('#messages'); if (!el) return;
   const oldNodes = new Map([...el.querySelectorAll('[data-message-id]')].map(node => [node.dataset.messageId, node]));
   const fragment = document.createElement('div');
-  fragment.innerHTML = session.messages.length ? [...session.messages].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id.localeCompare(b.id)).map(m => `<div data-message-id="${escape(m.id)}" class="message ${m.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}">${m.media ? `<div class="attachment-preview ${m.media.kind === 'image' ? 'preview-image' : 'preview-pdf'}" data-preview-id="${escape(m.id)}">Carregando prévia…</div><button type="button" class="message-attachment" data-media-id="${escape(m.id)}">${m.media.kind === 'image' ? '📷 Ampliar foto' : '📄 Abrir ou baixar PDF'}<small>${escape(m.media.fileName)}</small></button>` : ''}${m.body ? `<p>${escape(m.body)}</p>` : ''}<time>${escape(date(m.createdAt))} · <span class="message-receipt ${m.status === 'READ' && m.direction === 'OUTBOUND' ? 'is-read' : ''}">${m.direction === 'OUTBOUND' ? m.status === 'READ' || m.status === 'DELIVERED' ? '✓✓ ' : m.status === 'SENT' ? '✓ ' : '' : ''}${escape(labels[m.status] || m.status)}</span></time></div>`).join('') : '<p class="no-results">Escreva a primeira mensagem para iniciar o atendimento.</p>';
+  fragment.innerHTML = session.messages.length ? [...session.messages].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id.localeCompare(b.id)).map(m => `<div data-message-id="${escape(m.id)}" class="message ${m.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}">${m.media ? `${m.media.kind === 'image' || m.media.mimeType === 'application/pdf' ? `<div class="attachment-preview ${m.media.kind === 'image' ? 'preview-image' : 'preview-pdf'}" data-preview-id="${escape(m.id)}">Carregando prévia…</div>` : ''}<button type="button" class="message-attachment" data-media-id="${escape(m.id)}">${m.media.kind === 'image' ? '📷 Ampliar foto' : m.media.mimeType === 'application/pdf' ? '📄 Abrir ou baixar PDF' : '📎 Baixar documento'}<small>${escape(m.media.fileName)}</small></button>` : ''}${m.body ? `<p>${escape(m.body)}</p>` : ''}<time>${escape(date(m.createdAt))} · <span class="message-receipt ${m.status === 'READ' && m.direction === 'OUTBOUND' ? 'is-read' : ''}">${m.direction === 'OUTBOUND' ? m.status === 'READ' || m.status === 'DELIVERED' ? '✓✓ ' : m.status === 'SENT' ? '✓ ' : '' : ''}${escape(labels[m.status] || m.status)}</span></time></div>`).join('') : '<p class="no-results">Escreva a primeira mensagem para iniciar o atendimento.</p>';
   const nextNodes = [...fragment.children].map(node => {
     const id = node.dataset.messageId, message = session.messages.find(m => m.id === id);
     const signature = message && JSON.stringify([message.body, message.media, message.direction]);
@@ -182,7 +184,7 @@ async function fetchMessageMedia(id, signal) {
   if(!response.ok){const data=await response.json().catch(()=>({}));if(response.status===401 && session.token===token)logout(false);throw new Error(data.message || 'Não foi possível abrir o anexo.');}
   const blob=await response.blob();
   if(session.token!==token || session.active?.id!==conversationId || session.page)throw new Error('Conversa alterada.');
-  if(blob.size>10*1024*1024 || !['image/jpeg','image/png','image/webp','application/pdf'].includes(blob.type))throw new Error('Formato ou tamanho do arquivo não permitido.');
+  if(blob.size>10*1024*1024 || blob.type.split(';')[0] !== message.media.mimeType)throw new Error('Formato ou tamanho do arquivo não permitido.');
   return blob;
 }
 async function openMessageMedia(id) {
@@ -190,19 +192,17 @@ async function openMessageMedia(id) {
   if(!message?.media)return;
   const blob=attachmentPreviews.get(id) || await fetchMessageMedia(id);
   if(token!==session.token || conversationId!==session.active?.id)return;
-  const url=URL.createObjectURL(blob);
   if(message.media.kind==='image' && blob.type.startsWith('image/')){
-    const dialog=modal('Imagem da conversa','<img class="message-image-viewer" alt="Imagem da conversa no WhatsApp"><a class="primary media-download">Baixar foto</a>');
-    $('img',dialog).src=url;const link=$('a',dialog);link.href=url;link.download=message.media.fileName;
-    dialog.addEventListener('close',()=>URL.revokeObjectURL(url),{once:true});
-    // Also release when another dialog replaces this one or the page logs out.
-    const observer=new MutationObserver(()=>{if(!dialog.isConnected){URL.revokeObjectURL(url);observer.disconnect();}});
-    observer.observe(document.body,{childList:true});
-  }else{
+    openImageViewer(blob,message.media.fileName);
+  }else if(blob.type === 'application/pdf'){
+    const url=URL.createObjectURL(blob);
     const dialog=modal('PDF da conversa','<object class="pdf-viewer" type="application/pdf"><p>Seu navegador não permite a prévia. Use o botão Baixar PDF.</p></object><a class="primary media-download">Baixar PDF</a>');
     $('object',dialog).data=url+'#page=1&view=FitH'; const link=$('a',dialog);link.href=url;link.download=message.media.fileName;
     dialog.addEventListener('close',()=>URL.revokeObjectURL(url),{once:true});
     const observer=new MutationObserver(()=>{if(!dialog.isConnected){URL.revokeObjectURL(url);observer.disconnect();}}); observer.observe(document.body,{childList:true});
+  }else{
+    const url=URL.createObjectURL(new Blob([blob],{type:'application/octet-stream'}));
+    const link=document.createElement('a');link.href=url;link.download=message.media.fileName;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
 }
 function attachFile(conversation) {
@@ -704,3 +704,14 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { ne
 window.addEventListener('online', () => { nextListRefresh = 0; autoRefresh.wake(); });
 const resetToken = new URLSearchParams(location.hash.slice(1)).get('reset');
 resetToken ? resetPassword(resetToken) : renderLogin();
+
+async function openConversationNotes(id) {
+  const dialog=modal('Observações internas', '<p>Visíveis somente para a equipe da sua empresa. Não são enviadas ao WhatsApp.</p><form id="note-form"><label>Nova observação<textarea name="body" rows="4" maxlength="4000" required placeholder="Registre informações para o próximo atendimento"></textarea></label><button class="primary" type="submit">Salvar observação interna</button></form><div class="conversation-notes" aria-live="polite"></div><button class="outline" id="more-notes" hidden>Carregar anteriores</button>');
+  const list=$('.conversation-notes',dialog), more=$('#more-notes',dialog);
+  let cursor=null;
+  const render=note=>{const article=document.createElement('article');article.className='internal-note';article.innerHTML=`<small>${escape(note.author?.name || 'Usuário removido')} · ${escape(date(note.createdAt))}</small><p>${escape(note.body)}</p>`;return article;};
+  const load=async()=>{const result=await api(`/conversations/${encoded(id)}/notes${cursor ? `?cursor=${encoded(cursor)}` : ''}`);if(!dialog.isConnected || !dialog.open)return;result.items.forEach(n=>list.append(render(n)));cursor=result.nextCursor;more.hidden=!cursor;};
+  more.onclick=e=>busy(e.currentTarget,load);
+  bindForm('#note-form',async(data,form)=>{const text=data.body.trim();if(!text)throw new Error('Escreva uma observação.');const note=await api(`/conversations/${encoded(id)}/notes`,{method:'POST',body:body({body:text})});if(dialog.isConnected && dialog.open){list.prepend(render(note));form.reset();}});
+  try{await load();}catch(error){notice(error.message);}
+}

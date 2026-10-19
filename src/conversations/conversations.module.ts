@@ -1,3 +1,4 @@
+import { ConversationNotesController, ConversationNotesService } from './conversation-notes';
 import { MessageMediaService } from './message-media.service';
 import { AttachmentSendService } from './attachment-send.service';
 import { AttachmentUploadGate } from './attachment-upload';
@@ -11,8 +12,8 @@ import { ContactsService } from './contacts.service';
 
 @Module({
   imports: [ChannelsModule, OutboundWebhooksModule],
-  controllers: [ConversationsController],
-  providers: [AttachmentUploadGate, AttachmentSendService, MessageMediaService, ConversationsService, ContactsService, ContactPhotosService],
+  controllers: [ConversationsController, ConversationNotesController],
+  providers: [ConversationNotesService, AttachmentUploadGate, AttachmentSendService, MessageMediaService, ConversationsService, ContactsService, ContactPhotosService],
   exports: [ConversationsService],
 })
 export class ConversationsModule {}

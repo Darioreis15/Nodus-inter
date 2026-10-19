@@ -65,3 +65,15 @@ describe('Media metadata and protected downloads', () => {
     expect((await service.download('t','c','m')).buffer).toEqual(pdf);
   });
 });
+
+describe('Received office documents',()=>{
+ const office=[['application/msword','doc'],['application/vnd.ms-excel','xls'],['application/vnd.ms-powerpoint','ppt'],['application/vnd.openxmlformats-officedocument.wordprocessingml.document','docx'],['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','xlsx'],['application/vnd.openxmlformats-officedocument.presentationml.presentation','pptx']];
+ it.each(office)('recognizes %s from both providers', (mime,ext)=>{
+  const evo=evolutionContent({message:{documentMessage:{mimetype:mime,fileName:`arquivo.${ext}`}}});
+  const meta=metaContent({type:'document',document:{mime_type:mime,filename:`arquivo.${ext}`,id:'123'}});
+  expect(evo.media).toMatchObject({kind:'document',mimeType:mime,fileName:`arquivo.${ext}`});expect(meta.media).toMatchObject({kind:'document',fileName:`arquivo.${ext}`});
+  const bytes=ext.endsWith('x')?Buffer.from([80,75,3,4,0]):Buffer.from([208,207,17,224,161,177,26,225]);
+  expect(validMediaBytes(bytes,mime)).toBe(true);expect(validMediaBytes(Buffer.from('<html>'),mime)).toBe(false);
+ });
+ it('keeps unknown binary downloads inert and strips path separators',()=>{expect(publicMedia({mimeType:'application/octet-stream',fileName:'../program.exe'})).toMatchObject({kind:'document',fileName:'.._program.bin'});});
+});
