@@ -1,0 +1,1 @@
+ALTER TABLE billing_cycles ADD COLUMN is_test BOOLEAN NOT NULL DEFAULT false;

@@ -27,4 +27,15 @@ describe('Billing delivery',()=>{
  it('enqueues both kinds atomically and skips historical invoices',async()=>{prisma.billingCycle.findMany.mockResolvedValue([{id:'old',createdAt:new Date('2026-10-19'),subscription:sub},{id:'new',createdAt:new Date('2026-11-01'),subscription:sub}]);await service.run();expect(prisma.billingDelivery.createMany.mock.calls[0][0].data).toEqual(expect.arrayContaining([expect.objectContaining({kind:'EMAIL',state:'SKIPPED'}),expect.objectContaining({kind:'WHATSAPP',state:'SKIPPED'})]));expect(prisma.billingDelivery.createMany.mock.calls[1][0].data.every((r:any)=>r.state==='QUEUED')).toBe(true);});
  it('reauthenticates owner and rejects foreign sender channels',async()=>{const dto:any={emailEnabled:true,whatsappEnabled:true,email:'finance@example.com',phone:'5531999999999',channelId:'channel',billingType:'BOLETO',takeoverConfirmed:true,currentPassword:'wrong'};await expect(service.save('tenant','00000000-0000-4000-8000-000000000001',dto)).rejects.toThrow();expect(asaas.setCustomerNotifications).not.toHaveBeenCalled();dto.currentPassword='correct';prisma.channel.findFirst.mockResolvedValue(null);await expect(service.save('tenant','00000000-0000-4000-8000-000000000001',dto)).rejects.toThrow('propria Nodus');expect(asaas.setCustomerNotifications).not.toHaveBeenCalled();});
  it('disables Asaas notifications before enabling delivery and fails closed if Asaas fails',async()=>{const dto:any={emailEnabled:true,whatsappEnabled:false,email:'finance@example.com',billingType:'BOLETO',takeoverConfirmed:true,currentPassword:'correct'};asaas.setCustomerNotifications.mockRejectedValueOnce(new Error('offline'));await expect(service.save('tenant','00000000-0000-4000-8000-000000000001',dto)).rejects.toThrow();expect(prisma.subscription.update).not.toHaveBeenCalled();await service.save('tenant','00000000-0000-4000-8000-000000000001',dto);expect(asaas.setCustomerNotifications).toHaveBeenCalledWith('cus',true);expect(prisma.subscription.update).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({deliveryEnabled:true,billingOptions:{billingType:'BOLETO'}})}));});
+ it('labels sandbox emails and blocks test delivery in production or over WhatsApp',async()=>{
+  row.cycle.isTest=true;process.env.BILLING_SANDBOX_TEST_ENABLED='true';process.env.ASAAS_BASE_URL='https://api-sandbox.asaas.com/v3';
+  await service.process(row.id);
+  const sent=JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
+  expect(sent.subject).toContain('[TESTE SANDBOX]');expect(sent.text).toContain('não efetue pagamento real');
+  fetchMock.mockClear();row.state='QUEUED';process.env.ASAAS_BASE_URL='https://api.asaas.com/v3';
+  await service.process(row.id);expect(row.state).toBe('SKIPPED');expect(fetchMock).not.toHaveBeenCalled();
+  row.state='QUEUED';row.kind='WHATSAPP';process.env.ASAAS_BASE_URL='https://api-sandbox.asaas.com/v3';
+  await service.process(row.id);expect(conversations.sendMessage).not.toHaveBeenCalled();
+ });
+
 });

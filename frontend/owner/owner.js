@@ -121,21 +121,26 @@ $('companyForm').onsubmit=async event=>{
   }catch(error){$('companyError').textContent=error.message;}finally{creatingCompany=false;$('saveCompany').disabled=false;$('closeCompany').disabled=false;$('companyOwnerPassword').value='';$('newAdminPassword').value='';}
 };
 
-let deliverySelection=null, deliveryBusy=false;
+let deliverySelection=null, deliveryBusy=false, sandboxTest=null;
 const deliveryLabels={QUEUED:'Na fila',RETRY:'Aguardando nova tentativa',SENDING:'Enviando',SENT:'Aceito pelo provedor / confirmado',REVIEW:'Revisão necessária',SKIPPED:'Não enviado'};
-const deliveryErrors={DISABLED:'Envio desativado ou contrato encerrado',BEFORE_ACTIVATION:'Cobrança anterior à ativação',PAYMENT_NOT_OPEN:'Cobrança paga, removida ou não disponível para pagamento',PAYMENT_MISMATCH:'Dados da cobrança divergentes',LINK_UNAVAILABLE:'Link da cobrança indisponível',EMAIL_CONFIG_REQUIRED:'Configure o e-mail no servidor e no contrato',WHATSAPP_CONFIG_REQUIRED:'Confira o canal conectado e o celular',META_TEMPLATE_REQUIRED:'Configure um modelo aprovado da Meta',DELIVERY_UNCERTAIN:'O provedor pode ter recebido. Confira antes de repetir',PREFLIGHT_UNAVAILABLE:'Não foi possível conferir os dados antes do envio'};
+const deliveryErrors={SANDBOX_DISABLED:'Teste desativado ou ambiente fora do Sandbox',SANDBOX_EMAIL_ONLY:'Teste exclusivo por e-mail',DISABLED:'Envio desativado ou contrato encerrado',BEFORE_ACTIVATION:'Cobrança anterior à ativação',PAYMENT_NOT_OPEN:'Cobrança paga, removida ou não disponível para pagamento',PAYMENT_MISMATCH:'Dados da cobrança divergentes',LINK_UNAVAILABLE:'Link da cobrança indisponível',EMAIL_CONFIG_REQUIRED:'Configure o e-mail no servidor e no contrato',WHATSAPP_CONFIG_REQUIRED:'Confira o canal conectado e o celular',META_TEMPLATE_REQUIRED:'Configure um modelo aprovado da Meta',DELIVERY_UNCERTAIN:'O provedor pode ter recebido. Confira antes de repetir',PREFLIGHT_UNAVAILABLE:'Não foi possível conferir os dados antes do envio'};
 async function openDelivery(company){
   if(deliveryBusy)return;deliveryBusy=true;$('notice').textContent='Carregando avisos…';
   try {
     const data=await api(`/owner/tenants/${encodeURIComponent(company.id)}/delivery`);if(!token)return;
     deliverySelection=company;$('deliveryForm').reset();$('deliveryCompany').textContent=company.name;
     $('deliveryReadiness').textContent=`Processamento ${data.workerEnabled?'ativado':'desativado no servidor'} · E-mail ${data.emailReady?'configurado':'pendente'} · Modelo Meta ${data.metaTemplateReady?'configurado':'pendente (apenas API oficial)'}`;
-    const prefs=data.settings||{};$('deliveryEmailEnabled').checked=!!prefs.emailEnabled;$('deliveryWhatsappEnabled').checked=!!prefs.whatsappEnabled;
+    const prefs=data.settings||{};
+    sandboxTest={...data.sandboxTest,email:prefs.email};
+    $('sandboxBillingSection').hidden=!sandboxTest.available;
+    $('sandboxBilling').disabled=!(data.workerEnabled&&data.emailReady&&data.enabled&&prefs.emailEnabled&&prefs.email);
+    $('sandboxBillingInfo').textContent=`Teste de ${money(sandboxTest.valueCents||500)} · e-mail salvo: ${prefs.email||'não configurado'} · um teste por empresa/dia. Salve a configuração antes de testar.`;
+    $('sandboxBillingResult').textContent='';$('deliveryEmailEnabled').checked=!!prefs.emailEnabled;$('deliveryWhatsappEnabled').checked=!!prefs.whatsappEnabled;
     $('deliveryEmail').value=prefs.email||'';$('deliveryPhone').value=prefs.phone||'';$('deliveryBillingType').value=data.billingType;
     $('deliveryChannel').replaceChildren(new Option('Selecione o canal remetente',''));
     for(const channel of data.channels){const option=new Option(`${channel.name} · ${channel.type==='OFFICIAL_META'?'Meta':'Evolution'} · ${channel.status}`,channel.id);option.selected=channel.id===prefs.channelId;$('deliveryChannel').append(option);}
     $('deliveryHistory').replaceChildren();
-    for(const row of data.history){const entry=document.createElement('div');entry.className='card';const text=document.createElement('p');text.textContent=`${row.cycle.month} · ${row.kind==='EMAIL'?'E-mail':'WhatsApp'} · ${deliveryLabels[row.state]||row.state}`;entry.append(text);if(row.error){const note=document.createElement('p');note.textContent=deliveryErrors[row.error]||'Confira o envio';entry.append(note);}
+    for(const row of data.history){const entry=document.createElement('div');entry.className='card';const text=document.createElement('p');text.textContent=`${row.cycle.isTest?'TESTE · ':''}${row.cycle.month} · ${row.kind==='EMAIL'?'E-mail':'WhatsApp'} · ${deliveryLabels[row.state]||row.state}`;entry.append(text);if(row.error){const note=document.createElement('p');note.textContent=deliveryErrors[row.error]||'Confira o envio';entry.append(note);}
       if(row.state==='REVIEW')for(const [action,label] of [['MARK_SENT','Confirmar que já foi enviado'],['RETRY_CONFIRMED_NOT_SENT','Conferi: não foi enviado. Tentar novamente']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.onclick=()=>reviewDelivery(row.id,action);entry.append(button);}
       $('deliveryHistory').append(entry);
     }
@@ -152,6 +157,7 @@ $('deliveryForm').onsubmit=async event=>{
     if($('deliveryWhatsappEnabled').checked && !/^[1-9]\d{7,14}$/.test(phone))throw new Error('Informe o celular com código do país, somente números.');
     const email=$('deliveryEmail').value.trim(),channelId=$('deliveryChannel').value;
     await api(`/owner/tenants/${encodeURIComponent(deliverySelection.id)}/delivery`,{method:'PATCH',body:JSON.stringify({emailEnabled:$('deliveryEmailEnabled').checked,whatsappEnabled:$('deliveryWhatsappEnabled').checked,...(email?{email}:{}),...(phone?{phone}:{}),...(channelId?{channelId}:{}),billingType:$('deliveryBillingType').value,takeoverConfirmed:$('deliveryAck').checked,currentPassword:$('deliveryPassword').value})});
+    const company=deliverySelection;deliveryBusy=false;await openDelivery(company);
     $('deliveryError').textContent='Configuração salva. Será aplicada nas próximas emissões.';
   }catch(error){$('deliveryError').textContent=error.message;}finally{deliveryBusy=false;$('saveDelivery').disabled=false;$('deliveryPassword').value='';}
 };
@@ -163,3 +169,20 @@ async function reviewDelivery(id,action){
   try{await api(`/owner/deliveries/${encodeURIComponent(id)}/review`,{method:'POST',body:JSON.stringify({action,currentPassword:$('deliveryPassword').value})});deliveryBusy=false;await openDelivery(company);}
   catch(error){$('deliveryError').textContent=error.message;}finally{deliveryBusy=false;$('deliveryPassword').value='';}
 }
+
+$('refreshDelivery').onclick=()=>{if(deliverySelection&&!deliveryBusy)openDelivery(deliverySelection);};
+$('sandboxBilling').onclick=async()=>{
+  if(deliveryBusy||!deliverySelection||!sandboxTest?.available)return;
+  const password=$('deliveryPassword').value;
+  if(!password){$('sandboxBillingResult').textContent='Preencha sua senha de proprietário no campo acima.';$('deliveryPassword').focus();return;}
+  if(!confirm(`Gerar ou consultar a cobrança de teste de R$ 5,00 no Sandbox e enviar para ${sandboxTest.email}? Repetições do mesmo teste não geram outra cobrança nem reenviam um e-mail já aceito.`))return;
+  const company=deliverySelection, snapshot={...sandboxTest};
+  deliveryBusy=true;$('sandboxBilling').disabled=true;$('saveDelivery').disabled=true;
+  try{
+    const result=await api(`/owner/tenants/${encodeURIComponent(company.id)}/sandbox-billing`,{method:'POST',body:JSON.stringify({currentPassword:password,confirmation:'SANDBOX_EMAIL',date:snapshot.date,expectedEmail:snapshot.email})});
+    deliveryBusy=false;await openDelivery(company);
+    if(!token||deliverySelection?.id!==company.id)return;
+    $('sandboxBillingResult').textContent=`Cobrança de teste registrada. E-mail: ${deliveryLabels[result.emailState]||result.emailState}. Confira sua caixa de entrada e o spam. ${result.error?(deliveryErrors[result.error]||'Confira o histórico.') : ''}`;
+  }catch(error){$('sandboxBillingResult').textContent=error.message;}
+  finally{deliveryBusy=false;$('sandboxBilling').disabled=false;$('saveDelivery').disabled=false;$('deliveryPassword').value='';}
+};

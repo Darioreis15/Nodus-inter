@@ -22,6 +22,7 @@ export class AsaasClient {
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
+      redirect: 'error',
       signal: AbortSignal.timeout(10000),
       headers: {
         'Content-Type': 'application/json',
