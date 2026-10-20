@@ -1,3 +1,5 @@
+import { ConversationsModule } from '../conversations/conversations.module';
+import { BillingDelivery } from './billing-delivery';
 import { BillingActivation } from './billing-activation';
 import { BillingRunController } from './billing-run.controller';
 import { BillingCalendar } from './billing-calendar';
@@ -7,8 +9,9 @@ import { BillingService } from './billing.service';
 import { AsaasClient } from './asaas.client';
 
 @Module({
+  imports:[ConversationsModule],
   controllers: [BillingController, BillingRunController],
-  providers: [BillingService, AsaasClient, BillingCalendar, BillingActivation],
-  exports: [BillingService, BillingCalendar, BillingActivation],
+  providers: [BillingDelivery, BillingService, AsaasClient, BillingCalendar, BillingActivation],
+  exports: [BillingDelivery, BillingService, BillingCalendar, BillingActivation],
 })
 export class BillingModule {}

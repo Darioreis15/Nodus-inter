@@ -70,6 +70,7 @@ model Plan {
 }
 
 model Tenant {
+  attachmentRequests PublicAttachmentRequest[]
   campaigns Campaign[]
   suppressions CampaignSuppression[]
   dispatchClock DateTime? @map("dispatch_clock")
@@ -244,6 +245,8 @@ model WebhookSubscription {
 }
 
 model Subscription {
+  deliveryEnabled Boolean @default(false) @map("delivery_enabled")
+  deliverySettings Json @default("{}") @map("delivery_settings")
   billingOptions Json @default("{}") @map("billing_options")
   calendarEnabled Boolean @default(false) @map("calendar_enabled")
   billingPriceCents Int? @map("billing_price_cents")
@@ -344,6 +347,7 @@ model CampaignSuppression {
 }
 
 model BillingCycle {
+  deliveries BillingDelivery[]
   id String @id @default(uuid())
   subscriptionId String @map("subscription_id")
   month String
@@ -369,4 +373,33 @@ model ConversationNote {
   author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
   @@index([conversationId, createdAt])
   @@map("conversation_notes")
+}
+
+model BillingDelivery {
+ id String @id @default(uuid())
+ cycleId String @map("cycle_id")
+ kind String
+ state String @default("QUEUED")
+ error String?
+ providerId String? @map("provider_id")
+ attemptedAt DateTime? @map("attempted_at")
+ nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+ createdAt DateTime @default(now()) @map("created_at")
+ updatedAt DateTime @updatedAt @map("updated_at")
+ cycle BillingCycle @relation(fields:[cycleId],references:[id],onDelete:Cascade)
+ @@unique([cycleId,kind])
+ @@index([state,nextAttemptAt])
+ @@map("billing_deliveries")
+}
+model PublicAttachmentRequest {
+ id String @id @default(uuid())
+ tenantId String @map("tenant_id")
+ keyHash String @map("key_hash")
+ fingerprint String
+ state String @default("SENDING")
+ response Json?
+ createdAt DateTime @default(now()) @map("created_at")
+ tenant Tenant @relation(fields:[tenantId],references:[id],onDelete:Cascade)
+ @@unique([tenantId,keyHash])
+ @@map("public_attachment_requests")
 }

@@ -345,3 +345,7 @@ ADMIN pode encerrar a própria assinatura via `POST /billing/cancel`, com senha 
 ## Calendário de cobrança
 
 Geração dia 1 e vencimento dia 10: consulte [publicação, migração e agendador](docs/CALENDARIO-COBRANCAS.md). Ativação global explícita no backend; cobranças existentes são preservadas.
+
+### Envio automático das mensalidades e boletos de ERPs
+
+Consulte [COBRANCAS-E-ANEXOS-API.md](docs/COBRANCAS-E-ANEXOS-API.md) para configurar avisos de novas mensalidades no Owner (Resend + canal WhatsApp Nodus) e usar `POST /public/v1/conversations/:id/attachments` com chave API e idempotência. O fluxo de mensalidade envia link seguro da fatura; o ERP pode enviar seu próprio PDF por multipart. Migration necessária; envio desativado por padrão. Ativar exige confirmar a desativação dos avisos nativos Asaas para aquele cliente.

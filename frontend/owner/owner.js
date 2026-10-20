@@ -14,7 +14,7 @@ async function api(path, options = {}) {
   }
   return data;
 }
-function signOut() { clearCompanyResult();$('companyDialog').close();$('companyForm').reset();token=''; selection=null; $('dashboard').hidden=true; $('loginPanel').hidden=false; $('logout').hidden=true; $('companies').replaceChildren(); $('action').close(); $('confirmPassword').value=''; }
+function signOut() { $('deliveryDialog').close();$('deliveryForm').reset();$('deliveryHistory').replaceChildren();deliverySelection=null; clearCompanyResult();$('companyDialog').close();$('companyForm').reset();token=''; selection=null; $('dashboard').hidden=true; $('loginPanel').hidden=false; $('logout').hidden=true; $('companies').replaceChildren(); $('action').close(); $('confirmPassword').value=''; }
 $('logout').onclick=signOut;
 $('login').onsubmit=async event=>{
   event.preventDefault(); const button=event.submitter; button.disabled=true; $('notice').textContent='Entrando…';
@@ -42,6 +42,7 @@ async function load(append) {
       if(company.subscription&&(company.subscription.status!=='CANCELED'||company.subscription.cancellationPending)){const cancel=document.createElement('button');cancel.textContent=company.subscription.cancellationPending?'Repetir cancelamento':'Encerrar contrato';cancel.onclick=()=>openAction(company,'cancel');actions.append(cancel);}
       if(company.subscription && (company.subscription.status!=='ACTIVE'||company.status!=='ACTIVE')){const activate=document.createElement('button');activate.textContent='Ativar contrato';activate.disabled=!!company.subscription.cancellationPending;activate.title=activate.disabled?'Conclua o cancelamento pendente primeiro':'';activate.onclick=()=>openAction(company,'activate');actions.append(activate);}
       if(!company.subscription){const create=document.createElement('button');create.textContent='Criar contrato';create.onclick=()=>openContract(company,create);actions.append(create);}
+      if(company.subscription){const delivery=document.createElement('button');delivery.textContent='Avisos de cobrança';delivery.onclick=()=>openDelivery(company);actions.append(delivery);}
       $('companies').append(row);
     }
     cursor=result.nextCursor;$('more').hidden=!cursor;$('empty').hidden=!!$('companies').children.length;$('notice').textContent='';
@@ -119,3 +120,46 @@ $('companyForm').onsubmit=async event=>{
     $('companyResult').showModal();$('search').value=data.tenant.slug;$('status').value='';await load(false);
   }catch(error){$('companyError').textContent=error.message;}finally{creatingCompany=false;$('saveCompany').disabled=false;$('closeCompany').disabled=false;$('companyOwnerPassword').value='';$('newAdminPassword').value='';}
 };
+
+let deliverySelection=null, deliveryBusy=false;
+const deliveryLabels={QUEUED:'Na fila',RETRY:'Aguardando nova tentativa',SENDING:'Enviando',SENT:'Aceito pelo provedor / confirmado',REVIEW:'Revisão necessária',SKIPPED:'Não enviado'};
+const deliveryErrors={DISABLED:'Envio desativado ou contrato encerrado',BEFORE_ACTIVATION:'Cobrança anterior à ativação',PAYMENT_NOT_OPEN:'Cobrança paga, removida ou não disponível para pagamento',PAYMENT_MISMATCH:'Dados da cobrança divergentes',LINK_UNAVAILABLE:'Link da cobrança indisponível',EMAIL_CONFIG_REQUIRED:'Configure o e-mail no servidor e no contrato',WHATSAPP_CONFIG_REQUIRED:'Confira o canal conectado e o celular',META_TEMPLATE_REQUIRED:'Configure um modelo aprovado da Meta',DELIVERY_UNCERTAIN:'O provedor pode ter recebido. Confira antes de repetir',PREFLIGHT_UNAVAILABLE:'Não foi possível conferir os dados antes do envio'};
+async function openDelivery(company){
+  if(deliveryBusy)return;deliveryBusy=true;$('notice').textContent='Carregando avisos…';
+  try {
+    const data=await api(`/owner/tenants/${encodeURIComponent(company.id)}/delivery`);if(!token)return;
+    deliverySelection=company;$('deliveryForm').reset();$('deliveryCompany').textContent=company.name;
+    $('deliveryReadiness').textContent=`Processamento ${data.workerEnabled?'ativado':'desativado no servidor'} · E-mail ${data.emailReady?'configurado':'pendente'} · Modelo Meta ${data.metaTemplateReady?'configurado':'pendente (apenas API oficial)'}`;
+    const prefs=data.settings||{};$('deliveryEmailEnabled').checked=!!prefs.emailEnabled;$('deliveryWhatsappEnabled').checked=!!prefs.whatsappEnabled;
+    $('deliveryEmail').value=prefs.email||'';$('deliveryPhone').value=prefs.phone||'';$('deliveryBillingType').value=data.billingType;
+    $('deliveryChannel').replaceChildren(new Option('Selecione o canal remetente',''));
+    for(const channel of data.channels){const option=new Option(`${channel.name} · ${channel.type==='OFFICIAL_META'?'Meta':'Evolution'} · ${channel.status}`,channel.id);option.selected=channel.id===prefs.channelId;$('deliveryChannel').append(option);}
+    $('deliveryHistory').replaceChildren();
+    for(const row of data.history){const entry=document.createElement('div');entry.className='card';const text=document.createElement('p');text.textContent=`${row.cycle.month} · ${row.kind==='EMAIL'?'E-mail':'WhatsApp'} · ${deliveryLabels[row.state]||row.state}`;entry.append(text);if(row.error){const note=document.createElement('p');note.textContent=deliveryErrors[row.error]||'Confira o envio';entry.append(note);}
+      if(row.state==='REVIEW')for(const [action,label] of [['MARK_SENT','Confirmar que já foi enviado'],['RETRY_CONFIRMED_NOT_SENT','Conferi: não foi enviado. Tentar novamente']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.onclick=()=>reviewDelivery(row.id,action);entry.append(button);}
+      $('deliveryHistory').append(entry);
+    }
+    if(!data.history.length)$('deliveryHistory').textContent='Nenhum envio registrado. A configuração vale para novas mensalidades.';
+    $('deliveryError').textContent='';if(!$('deliveryDialog').open)$('deliveryDialog').showModal();$('notice').textContent='';
+  }catch(error){$('notice').textContent=error.message;}finally{deliveryBusy=false;}
+}
+$('closeDelivery').onclick=()=>{if(!deliveryBusy){$('deliveryDialog').close();$('deliveryForm').reset();deliverySelection=null;}};
+$('deliveryDialog').addEventListener('cancel',event=>{if(deliveryBusy)event.preventDefault();else{$('deliveryForm').reset();deliverySelection=null;}});
+$('deliveryForm').onsubmit=async event=>{
+  event.preventDefault();if(!deliverySelection||deliveryBusy)return;deliveryBusy=true;$('saveDelivery').disabled=true;
+  try{
+    const phone=$('deliveryPhone').value.replace(/[\s()+-]/g,'');
+    if($('deliveryWhatsappEnabled').checked && !/^[1-9]\d{7,14}$/.test(phone))throw new Error('Informe o celular com código do país, somente números.');
+    const email=$('deliveryEmail').value.trim(),channelId=$('deliveryChannel').value;
+    await api(`/owner/tenants/${encodeURIComponent(deliverySelection.id)}/delivery`,{method:'PATCH',body:JSON.stringify({emailEnabled:$('deliveryEmailEnabled').checked,whatsappEnabled:$('deliveryWhatsappEnabled').checked,...(email?{email}:{}),...(phone?{phone}:{}),...(channelId?{channelId}:{}),billingType:$('deliveryBillingType').value,takeoverConfirmed:$('deliveryAck').checked,currentPassword:$('deliveryPassword').value})});
+    $('deliveryError').textContent='Configuração salva. Será aplicada nas próximas emissões.';
+  }catch(error){$('deliveryError').textContent=error.message;}finally{deliveryBusy=false;$('saveDelivery').disabled=false;$('deliveryPassword').value='';}
+};
+async function reviewDelivery(id,action){
+  if(deliveryBusy||!deliverySelection)return;
+  if(!$('deliveryPassword').value){$('deliveryError').textContent='Preencha sua senha de proprietário antes de revisar.';$('deliveryPassword').focus();return;}
+  if(!confirm(action==='MARK_SENT'?'Você verificou que este aviso foi enviado?':'Confirma que verificou no provedor e este aviso NÃO foi enviado? Uma nova tentativa pode duplicar mensagens se o envio anterior tiver ocorrido.'))return;
+  const company=deliverySelection;deliveryBusy=true;
+  try{await api(`/owner/deliveries/${encodeURIComponent(id)}/review`,{method:'POST',body:JSON.stringify({action,currentPassword:$('deliveryPassword').value})});deliveryBusy=false;await openDelivery(company);}
+  catch(error){$('deliveryError').textContent=error.message;}finally{deliveryBusy=false;$('deliveryPassword').value='';}
+}

@@ -1,4 +1,4 @@
-import { BadRequestException, CallHandler, ExecutionContext, Injectable, NestInterceptor, NotFoundException, ServiceUnavailableException, UnsupportedMediaTypeException } from '@nestjs/common';
+import { BadRequestException, CallHandler, ExecutionContext, Injectable, NestInterceptor, UnauthorizedException, NotFoundException, ServiceUnavailableException, UnsupportedMediaTypeException } from '@nestjs/common';
 import { IsOptional, IsString, MaxLength } from 'class-validator';
 import { finalize } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,9 +17,12 @@ export class AttachmentUploadGate implements NestInterceptor {
   async intercept(context: ExecutionContext, next: CallHandler) {
     const req = context.switchToHttp().getRequest();
     if (!req.is('multipart/form-data')) throw new BadRequestException('Envie um arquivo como multipart/form-data.');
-    const conversation = await this.prisma.conversation.findFirst({where:{id:req.params.id,channel:{tenantId:req.user.tenantId}},select:{id:true}});
+    const tenantId=req.user?.tenantId || req.apiTenantId;
+    if(!tenantId) throw new UnauthorizedException();
+    if(req.apiTenantId && !/^[a-zA-Z0-9_.:-]{8,128}$/.test(req.headers['idempotency-key'] || '')) throw new BadRequestException('Envie Idempotency-Key (8 a 128 caracteres).');
+    const conversation = await this.prisma.conversation.findFirst({where:{id:req.params.id,channel:{tenantId}},select:{id:true}});
     if (!conversation) throw new NotFoundException('Conversa nao encontrada.');
-    await this.rate.consume(`upload:${req.user.tenantId}`, 10, 60000);
+    await this.rate.consume(`upload:${tenantId}`, 10, 60000);
     if (this.active >= 2) throw new ServiceUnavailableException('Outros arquivos estao sendo enviados. Aguarde alguns segundos.');
     this.active++;
     return next.handle().pipe(finalize(() => this.active--));
