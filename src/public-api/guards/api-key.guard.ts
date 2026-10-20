@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { RateGuard } from '../../security/rate.guard';
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -25,6 +26,7 @@ export class ApiKeyGuard implements CanActivate {
     await assertTenantAccess(this.prisma, tenantId);
     await this.rate.consume(`tenant:${tenantId}`, 600, 60000);
     request.apiTenantId = tenantId;
+    request.apiKeyHash = createHash('sha256').update(rawKey).digest('hex');
     return true;
   }
 }

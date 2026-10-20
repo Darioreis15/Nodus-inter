@@ -349,3 +349,7 @@ Geração dia 1 e vencimento dia 10: consulte [publicação, migração e agenda
 ### Envio automático das mensalidades e boletos de ERPs
 
 Consulte [COBRANCAS-E-ANEXOS-API.md](docs/COBRANCAS-E-ANEXOS-API.md) para configurar avisos de novas mensalidades no Owner (Resend + canal WhatsApp Nodus) e usar `POST /public/v1/conversations/:id/attachments` com chave API e idempotência. O fluxo de mensalidade envia link seguro da fatura; o ERP pode enviar seu próprio PDF por multipart. Migration necessária; envio desativado por padrão. Ativar exige confirmar a desativação dos avisos nativos Asaas para aquele cliente.
+
+## Fila da API, templates PDF e documentos Office
+
+Consulte [API-FILA-TEMPLATES-E-DOCUMENTOS.md](docs/API-FILA-TEMPLATES-E-DOCUMENTOS.md) para ativação, limites, Postman e homologação. A fila fica desativada por padrão. Inclui runner opcional no Contabo sem Docker.

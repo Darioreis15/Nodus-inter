@@ -1,3 +1,4 @@
+import { OUTBOUND_MIMES } from './outbound-file';
 import { BadRequestException, CallHandler, ExecutionContext, Injectable, NestInterceptor, UnauthorizedException, NotFoundException, ServiceUnavailableException, UnsupportedMediaTypeException } from '@nestjs/common';
 import { IsOptional, IsString, MaxLength } from 'class-validator';
 import { finalize } from 'rxjs';
@@ -31,7 +32,7 @@ export class AttachmentUploadGate implements NestInterceptor {
 export const attachmentUploadOptions = {
   limits: {fileSize:10*1024*1024, files:1, fields:1, parts:2, fieldSize:8192},
   fileFilter: (_req: unknown, file: {mimetype:string}, cb: (error: Error|null, accept: boolean) => void) => {
-    if (!['image/jpeg','image/png','image/webp','application/pdf'].includes(file.mimetype)) return cb(new UnsupportedMediaTypeException('Selecione uma imagem JPEG/PNG/WebP ou PDF.'),false);
+    if (!OUTBOUND_MIMES.includes(file.mimetype)) return cb(new UnsupportedMediaTypeException('Selecione PDF, imagem ou documento Word, Excel ou PowerPoint.'),false);
     cb(null,true);
   },
 };

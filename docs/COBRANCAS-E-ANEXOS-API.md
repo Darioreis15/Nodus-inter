@@ -118,3 +118,7 @@ Consulte `GET /public/v1/conversations/:id/messages` para acompanhar o status po
 Os testes automatizados usam provedores simulados e cobrem concorrência, idempotência, escopo de empresa, bloqueios, configuração do Owner, pagamentos não abertos e falhas incertas. Não houve envio real nesta implementação. O teste visual e a entrega real em homologação devem ocorrer depois do deploy.
 
 Referências: https://docs.asaas.com/reference/atualizar-cliente-existente ; https://docs.asaas.com/docs/cobrancas-via-boleto ; https://resend.com/docs/dashboard/emails/idempotency-keys
+
+## Atualização de formatos e processamento
+
+As rotas de anexo agora também aceitam Word, Excel e PowerPoint. Para fila persistente e template Meta com PDF, consulte [API-FILA-TEMPLATES-E-DOCUMENTOS.md](API-FILA-TEMPLATES-E-DOCUMENTOS.md). O envio de planilha exige o arquivo gerado pelo ERP; não há conversão de PDF para Excel.

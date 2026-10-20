@@ -1,3 +1,8 @@
+import { DeliveryController, DeliveryRunController } from './delivery.controller';
+import { DeliveryService } from './delivery.service';
+import { DeliveryWorker } from './delivery.worker';
+import { DeliveryInput } from './delivery-input';
+import { PublicTemplatesService } from './public-templates.service';
 import { PublicAttachmentsController, PublicAttachmentsService } from './public-attachments';
 import { Module } from '@nestjs/common';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
@@ -7,7 +12,7 @@ import { ApiKeyGuard } from './guards/api-key.guard';
 
 @Module({
   imports: [ApiKeysModule, ConversationsModule],
-  controllers: [PublicAttachmentsController, PublicConversationsController, PublicChannelsController],
-  providers: [PublicAttachmentsService, ApiKeyGuard],
+  controllers: [DeliveryController, DeliveryRunController, PublicAttachmentsController, PublicConversationsController, PublicChannelsController],
+  providers: [DeliveryService, DeliveryWorker, DeliveryInput, PublicTemplatesService, PublicAttachmentsService, ApiKeyGuard],
 })
 export class PublicApiModule {}

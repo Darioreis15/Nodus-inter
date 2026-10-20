@@ -16,7 +16,8 @@
     "privacy:retention": "ts-node scripts/retention.ts",
     "privacy:erase-tenant": "ts-node scripts/erase-tenant.ts",
     "security:cleanup": "ts-node scripts/cleanup-security.ts",
-    "test:migrations": "node scripts/check-migrations.cjs"
+    "test:migrations": "node scripts/check-migrations.cjs",
+    "test:api-delivery-migration": "node scripts/check-api-delivery-migration.cjs"
   },
   "jest": {
     "moduleFileExtensions": [
