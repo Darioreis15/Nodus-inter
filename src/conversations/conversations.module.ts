@@ -15,6 +15,6 @@ import { ContactsService } from './contacts.service';
   imports: [ChannelsModule, OutboundWebhooksModule],
   controllers: [PipelineRunController, ConversationsController, ConversationNotesController],
   providers: [PipelineWorker, ConversationNotesService, AttachmentUploadGate, AttachmentSendService, MessageMediaService, ConversationsService, ContactsService, ContactPhotosService],
-  exports: [ConversationsService],
+  exports: [ConversationsService, AttachmentUploadGate, AttachmentSendService],
 })
 export class ConversationsModule {}

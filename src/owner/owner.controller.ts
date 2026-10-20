@@ -1,3 +1,4 @@
+import { BillingDelivery, BillingDeliveryDto, DeliveryReviewDto } from '../billing/billing-delivery';
 import { UsersModule } from '../users/users.module';
 import { OwnerCompaniesService } from './owner-companies.service';
 import { CreateCompanyDto } from './create-company.dto';
@@ -77,7 +78,13 @@ export class OwnerService {
 @Controller('owner')
 @UseGuards(JwtAuthGuard, OwnerGuard)
 export class OwnerController {
-  constructor(private service: OwnerService, private prisma: PrismaService, private billing: BillingService, private calendar: BillingCalendar, private activation: BillingActivation, private companies: OwnerCompaniesService) {}
+  constructor(private service: OwnerService, private prisma: PrismaService, private billing: BillingService, private calendar: BillingCalendar, private activation: BillingActivation, private companies: OwnerCompaniesService, private delivery: BillingDelivery) {}
+  @Get('tenants/:id/delivery') @AllowSuspendedTenant()
+  deliveryConfig(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) { return this.delivery.config(id, user.userId); }
+  @Patch('tenants/:id/delivery') @AllowSuspendedTenant()
+  deliverySave(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: BillingDeliveryDto) { return this.delivery.save(id, user.userId, dto); }
+  @Post('deliveries/:id/review') @AllowSuspendedTenant()
+  deliveryReview(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: DeliveryReviewDto) { return this.delivery.review(id, user.userId, dto); }
   @Get('me') @AllowSuspendedTenant()
   me(@CurrentUser() user: AuthenticatedUser) { return { email: user.email, access: 'PLATFORM_OWNER' }; }
   @Get('summary') @AllowSuspendedTenant()

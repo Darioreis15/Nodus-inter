@@ -38,6 +38,11 @@ export class AsaasClient {
     return data as T;
   }
 
+  async setCustomerNotifications(id:string,disabled:boolean) {
+    const customer=await this.request<{id:string;notificationDisabled:boolean}>(`/customers/${encodeURIComponent(id)}`,{method:'PUT',body:JSON.stringify({notificationDisabled:disabled})});
+    if(customer?.id!==id || customer.notificationDisabled!==disabled)throw new BadGatewayException('Asaas nao confirmou as notificacoes do cliente.');
+  }
+
   getSubscription(id: string) {
     return this.request<any>(`/subscriptions/${encodeURIComponent(id)}`);
   }

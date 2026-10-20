@@ -1,3 +1,4 @@
+import { PublicAttachmentsController, PublicAttachmentsService } from './public-attachments';
 import { Module } from '@nestjs/common';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { ConversationsModule } from '../conversations/conversations.module';
@@ -6,7 +7,7 @@ import { ApiKeyGuard } from './guards/api-key.guard';
 
 @Module({
   imports: [ApiKeysModule, ConversationsModule],
-  controllers: [PublicConversationsController, PublicChannelsController],
-  providers: [ApiKeyGuard],
+  controllers: [PublicAttachmentsController, PublicConversationsController, PublicChannelsController],
+  providers: [PublicAttachmentsService, ApiKeyGuard],
 })
 export class PublicApiModule {}
