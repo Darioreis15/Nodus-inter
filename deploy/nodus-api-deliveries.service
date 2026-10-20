@@ -1,0 +1,22 @@
+[Unit]
+Description=Nodus API delivery queue runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nodus-queue
+Group=nodus-queue
+WorkingDirectory=/opt/nodus-api-deliveries
+EnvironmentFile=/opt/nodus-api-deliveries/runner.env
+ExecStart=/usr/bin/node /opt/nodus-api-deliveries/run-api-deliveries.cjs
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+TimeoutStopSec=95
+
+[Install]
+WantedBy=multi-user.target

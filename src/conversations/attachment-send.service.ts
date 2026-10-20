@@ -1,3 +1,4 @@
+import { validateOutboundFile } from './outbound-file';
 import { trackOutbound } from './pipeline';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, PayloadTooLargeException, UnsupportedMediaTypeException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -15,20 +16,17 @@ export class AttachmentSendService {
     const conversation = await this.prisma.conversation.findFirst({where:{id:conversationId,channel:{tenantId}},include:{channel:true,contact:true}});
     if (!conversation) throw new NotFoundException('Conversa nao encontrada.');
     if(conversation.status==='RESOLVED') throw new ForbiddenException('Atendimento finalizado. Inicie uma nova conversa.');
-    if (!file?.buffer?.length) throw new BadRequestException('Selecione um arquivo para enviar.');
-    if (file.buffer.length > MEDIA_MAX_BYTES) throw new PayloadTooLargeException('Arquivo excede o limite de 10 MB.');
-    const media = mediaMetadata(file.mimetype,file.originalname,undefined,file.buffer.length);
-    if (!media || !validMediaBytes(file.buffer,media.mimeType)) throw new UnsupportedMediaTypeException('Conteudo do arquivo nao corresponde a um formato permitido.');
+    const media = validateOutboundFile(file);
     if (typeof caption !== 'string' || caption.length > 1024) throw new BadRequestException('Legenda deve ter no maximo 1024 caracteres.');
     const channel = conversation.channel;
     if (channel.status !== 'CONNECTED') throw new ForbiddenException('Conecte o canal antes de enviar o arquivo.');
     if (channel.type === 'OFFICIAL_META') {
       if (media.mimeType === 'image/webp') throw new UnsupportedMediaTypeException('Para enviar fotos pela Meta, use JPEG ou PNG.');
-      if (media.kind === 'image' && file.buffer.length > 5*1024*1024) throw new PayloadTooLargeException('Fotos enviadas pela Meta devem ter ate 5 MB.');
+      if (media.kind === 'image' && file!.buffer.length > 5*1024*1024) throw new PayloadTooLargeException('Fotos enviadas pela Meta devem ter ate 5 MB.');
       const recent = await this.prisma.message.findFirst({where:{conversationId,direction:'INBOUND',createdAt:{gt:new Date(Date.now()-24*3600000)}}});
       if (!recent) throw new ForbiddenException('Fora da janela de atendimento da Meta. Aguarde uma mensagem do cliente ou envie um template aprovado.');
     }
-    const result = await (channel.type === 'QR_EVOLUTION' ? this.evolution : this.meta).sendMedia(channel as any,{to:conversation.contact.waId,caption,buffer:file.buffer,media});
+    const result = await (channel.type === 'QR_EVOLUTION' ? this.evolution : this.meta).sendMedia(channel as any,{to:conversation.contact.waId,caption,buffer:file!.buffer,media});
     const storedMedia = {...media,...(result.providerId ? {providerId:result.providerId} : {})};
     // Use the same locks as Evolution echoes to prevent a duplicate message when
     // the webhook arrives before the send response. Preserve delivered/read status.

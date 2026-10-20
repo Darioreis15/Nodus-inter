@@ -1,0 +1,265 @@
+{
+  "info": {
+    "name": "Nodus - Fila, templates PDF e Excel",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Execute individualmente: estas requisicoes enviam mensagens reais. Configure chave API privada e destinatario autorizado. Use nova Idempotency-Key para cada operacao; preserve chave e conteudo em repeticoes. O template deve corresponder ao aprovado na conta."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{apiKey}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "01 - Listar canais",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/channels"
+      }
+    },
+    {
+      "name": "02 - Abrir conversa (DDD + telefone)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/conversations",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"channelId\": \"{{channelId}}\",\n  \"phone\": \"{{phone}}\",\n  \"name\": \"Cliente de homologacao\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code >= 200 && pm.response.code < 300) pm.environment.set(\"conversationId\", pm.response.json().id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Enfileirar texto",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Idempotency-Key",
+            "value": "{{idempotencyKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/conversations/{{conversationId}}/deliveries",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"kind\": \"TEXT\",\n  \"text\": \"Mensagem de homologacao\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code >= 200 && pm.response.code < 300) pm.environment.set(\"deliveryId\", pm.response.json().id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Enfileirar PDF ou Excel (selecionar file)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Idempotency-Key",
+            "value": "{{idempotencyKey}}"
+          }
+        ],
+        "url": "{{baseUrl}}/conversations/{{conversationId}}/deliveries",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "kind",
+              "value": "ATTACHMENT",
+              "type": "text"
+            },
+            {
+              "key": "caption",
+              "value": "Segue sua fatura.",
+              "type": "text"
+            },
+            {
+              "key": "file",
+              "type": "file",
+              "src": null
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code >= 200 && pm.response.code < 300) pm.environment.set(\"deliveryId\", pm.response.json().id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 - Enfileirar template com PDF (selecionar file)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Idempotency-Key",
+            "value": "{{idempotencyKey}}"
+          }
+        ],
+        "url": "{{baseUrl}}/conversations/{{conversationId}}/deliveries",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "kind",
+              "value": "TEMPLATE",
+              "type": "text"
+            },
+            {
+              "key": "name",
+              "value": "{{templateName}}",
+              "type": "text"
+            },
+            {
+              "key": "language",
+              "value": "pt_BR",
+              "type": "text"
+            },
+            {
+              "key": "parameters",
+              "value": "[\"Cliente Exemplo\"]",
+              "type": "text"
+            },
+            {
+              "key": "file",
+              "type": "file",
+              "src": null
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code >= 200 && pm.response.code < 300) pm.environment.set(\"deliveryId\", pm.response.json().id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 - Consultar protocolo",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/deliveries/{{deliveryId}}"
+      }
+    },
+    {
+      "name": "07 - Listar protocolos",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/deliveries"
+      }
+    },
+    {
+      "name": "08 - Cancelar item pendente",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": "{{baseUrl}}/deliveries/{{deliveryId}}"
+      }
+    },
+    {
+      "name": "09 - Template imediato com PDF (selecionar file)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Idempotency-Key",
+            "value": "{{idempotencyKey}}"
+          }
+        ],
+        "url": "{{baseUrl}}/conversations/{{conversationId}}/template",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "name",
+              "value": "{{templateName}}",
+              "type": "text"
+            },
+            {
+              "key": "language",
+              "value": "pt_BR",
+              "type": "text"
+            },
+            {
+              "key": "parameters",
+              "value": "[\"Cliente Exemplo\"]",
+              "type": "text"
+            },
+            {
+              "key": "file",
+              "type": "file",
+              "src": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "10 - Consultar mensagens",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/conversations/{{conversationId}}/messages"
+      }
+    }
+  ]
+}

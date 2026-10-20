@@ -70,6 +70,8 @@ model Plan {
 }
 
 model Tenant {
+  apiDeliveries ApiDelivery[]
+  apiDispatchAfter DateTime? @map("api_dispatch_after")
   attachmentRequests PublicAttachmentRequest[]
   campaigns Campaign[]
   suppressions CampaignSuppression[]
@@ -163,6 +165,7 @@ model Contact {
 }
 
 model Conversation {
+  apiDeliveries ApiDelivery[]
   id             String             @id @default(uuid())
   channelId      String             @map("channel_id")
   contactId      String             @map("contact_id")
@@ -402,4 +405,32 @@ model PublicAttachmentRequest {
  tenant Tenant @relation(fields:[tenantId],references:[id],onDelete:Cascade)
  @@unique([tenantId,keyHash])
  @@map("public_attachment_requests")
+}
+
+model ApiDelivery {
+ id String @id @default(uuid())
+ tenantId String @map("tenant_id")
+ conversationId String @map("conversation_id")
+ apiKeyHash String @map("api_key_hash")
+ keyHash String @map("key_hash")
+ fingerprint String
+ kind String
+ state String @default("QUEUED")
+ payload String?
+ payloadBytes Int @map("payload_bytes")
+ attempts Int @default(0)
+ nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+ expiresAt DateTime @map("expires_at")
+ leaseUntil DateTime? @map("lease_until")
+ messageId String? @map("message_id")
+ errorCode String? @map("error_code")
+ createdAt DateTime @default(now()) @map("created_at")
+ updatedAt DateTime @updatedAt @map("updated_at")
+ tenant Tenant @relation(fields:[tenantId],references:[id],onDelete:Cascade)
+ conversation Conversation @relation(fields:[conversationId],references:[id],onDelete:Cascade)
+ @@unique([tenantId,keyHash])
+ @@index([state,nextAttemptAt])
+ @@index([tenantId,createdAt,id])
+ @@index([conversationId])
+ @@map("api_deliveries")
 }

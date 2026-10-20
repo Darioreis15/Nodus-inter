@@ -1,3 +1,5 @@
+import { validateOutboundFile } from './outbound-file';
+import type { AttachmentFile } from './attachment-upload';
 import { inboundPipeline, trackOutbound } from './pipeline';
 import { MessageMedia, publicMedia } from './message-media';
 import { Prisma } from '@prisma/client';
@@ -363,17 +365,20 @@ export class ConversationsService {
     });
   }
 
-  async sendTemplate(tenantId: string, conversationId: string, dto: TemplateMessageDto, trackReply = true) {
+  async sendTemplate(tenantId: string, conversationId: string, dto: TemplateMessageDto, trackReply = true, document?:AttachmentFile) {
     const startedAt=new Date();
     const conversation = await this.prisma.conversation.findFirst({ where: { id: conversationId, channel: { tenantId } }, include: { channel: true, contact: true } });
     if (!conversation) throw new NotFoundException('Conversa nao encontrada.');
     if(conversation.status==='RESOLVED') throw new ForbiddenException('Atendimento finalizado. Inicie uma nova conversa.');
     if (conversation.channel.type !== 'OFFICIAL_META') throw new ForbiddenException('Templates sao exclusivos da Meta.');
-    const result = await this.metaConnector.sendTemplate(conversation.channel, conversation.contact.waId, dto);
+    if(conversation.channel.status!=='CONNECTED')throw new ForbiddenException('Canal desconectado.');
+    const media=document ? validateOutboundFile(document,true) : undefined;
+    const result = await this.metaConnector.sendTemplate(conversation.channel, conversation.contact.waId, dto, document && {...document,originalname:media!.fileName});
     const message = await this.prisma.message.create({ data: {
       conversationId, direction: 'OUTBOUND', externalId: result.externalId,
       fromNumber: conversation.channel.externalId || '', toNumber: conversation.contact.waId,
       body: `[Template: ${dto.name} (${dto.language})]${dto.parameters.length ? ' ' + dto.parameters.join(' | ') : ''}`, status: 'SENT',
+      ...(media ? {media:{...media,providerId:result.providerId}} : {}),
     } });
     if(trackReply) await this.prisma.$transaction(tx=>trackOutbound(tx,tenantId,conversationId,startedAt));
     return message;
