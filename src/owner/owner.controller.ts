@@ -1,4 +1,4 @@
-import { BillingSandbox, SandboxBillingDto } from '../billing/billing-sandbox';
+import { BillingSandbox, SandboxBillingDto, SandboxWhatsappDto } from '../billing/billing-sandbox';
 import { BillingDelivery, BillingDeliveryDto, DeliveryReviewDto } from '../billing/billing-delivery';
 import { UsersModule } from '../users/users.module';
 import { OwnerCompaniesService } from './owner-companies.service';
@@ -80,6 +80,8 @@ export class OwnerService {
 @UseGuards(JwtAuthGuard, OwnerGuard)
 export class OwnerController {
   constructor(private service: OwnerService, private prisma: PrismaService, private billing: BillingService, private calendar: BillingCalendar, private activation: BillingActivation, private companies: OwnerCompaniesService, private delivery: BillingDelivery, private sandbox: BillingSandbox) {}
+  @Post('tenants/:id/sandbox-whatsapp') @AllowSuspendedTenant()
+  sandboxWhatsapp(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: SandboxWhatsappDto) { return this.sandbox.whatsapp(id, user.userId, dto); }
   @Post('tenants/:id/sandbox-billing') @AllowSuspendedTenant()
   sandboxBilling(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: SandboxBillingDto) { return this.sandbox.issue(id, user.userId, dto); }
   @Get('tenants/:id/delivery') @AllowSuspendedTenant()

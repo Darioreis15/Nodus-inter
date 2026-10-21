@@ -380,6 +380,7 @@ model ConversationNote {
 }
 
 model BillingDelivery {
+ testTarget Json? @map("test_target")
  id String @id @default(uuid())
  cycleId String @map("cycle_id")
  kind String

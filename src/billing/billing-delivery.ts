@@ -45,7 +45,8 @@ export class BillingDelivery implements OnModuleInit,OnModuleDestroy {
   const history=await this.prisma.billingDelivery.findMany({where:{cycle:{subscriptionId:sub.id}},orderBy:{createdAt:'desc'},take:30,select:{id:true,kind:true,state:true,error:true,attemptedAt:true,updatedAt:true,cycle:{select:{month:true,dueDate:true,isTest:true}}}});
   const channels=await this.prisma.channel.findMany({where:{tenantId:actor.tenantId},select:{id:true,name:true,type:true,status:true}});
   const pendingTest=await this.prisma.billingCycle.findFirst({where:{subscriptionId:sub.id,isTest:true,state:'SENDING'},orderBy:{createdAt:'asc'}});
-  return {sandboxTest:{available:sandboxBillingAvailable(),date:pendingTest?.month.slice(5)||saoPauloDate(),valueCents:500},enabled:sub.deliveryEnabled,settings:sub.deliverySettings,billingType:(sub.billingOptions as any)?.billingType||'UNDEFINED',history,channels,workerEnabled:process.env.BILLING_DELIVERY_ENABLED==='true',emailReady:!!(process.env.RESEND_API_KEY&&process.env.MAIL_FROM),metaTemplateReady:!!process.env.BILLING_WHATSAPP_TEMPLATE_NAME};
+  const latestTest=await this.prisma.billingCycle.findFirst({where:{subscriptionId:sub.id,isTest:true,state:'CREATED',paymentId:{not:null},valueCents:500},orderBy:{createdAt:'desc'}});
+  return {sandboxTest:{available:sandboxBillingAvailable(),cycleId:latestTest?.id||null,date:pendingTest?.month.slice(5)||saoPauloDate(),valueCents:500},enabled:sub.deliveryEnabled,settings:sub.deliverySettings,billingType:(sub.billingOptions as any)?.billingType||'UNDEFINED',history,channels,workerEnabled:process.env.BILLING_DELIVERY_ENABLED==='true',emailReady:!!(process.env.RESEND_API_KEY&&process.env.MAIL_FROM),metaTemplateReady:!!process.env.BILLING_WHATSAPP_TEMPLATE_NAME};
  }
  async save(tenantId:string,actorId:string,dto:BillingDeliveryDto){
   const actor=await this.owner(actorId,dto.currentPassword);
@@ -94,7 +95,11 @@ export class BillingDelivery implements OnModuleInit,OnModuleDestroy {
   const cycle=row.cycle,sub=cycle.subscription,prefs=sub.deliverySettings as any;
   let claimed=false;
   try{
-   if(cycle.isTest && (!sandboxBillingAvailable() || process.env.BILLING_DELIVERY_ENABLED!=='true' || row.kind!=='EMAIL')){await this.skip(id,'SANDBOX_DISABLED');return;}
+   if(cycle.isTest && (!sandboxBillingAvailable() || process.env.BILLING_DELIVERY_ENABLED!=='true')){await this.skip(id,'SANDBOX_DISABLED');return;}
+   if(cycle.isTest && row.kind==='WHATSAPP'){
+    const target=row.testTarget as any;
+    if(!target || target.phone!==prefs.phone || target.channelId!==prefs.channelId){await this.skip(id,'SANDBOX_TARGET_CHANGED');return;}
+   }
    if(!sub.deliveryEnabled || sub.status==='CANCELED'||sub.cancellationPending || !(row.kind==='EMAIL'?prefs.emailEnabled:prefs.whatsappEnabled)){await this.skip(id,'DISABLED');return;}
    const payment=await this.asaas.getPayment(cycle.paymentId!);
    if(!verifiedPayment(payment,cycle,sub)){await this.skip(id,'PAYMENT_NOT_OPEN');return;}
@@ -109,6 +114,7 @@ export class BillingDelivery implements OnModuleInit,OnModuleDestroy {
     sender=await this.owner(process.env.PLATFORM_OWNER_USER_ID||'');
     channel=await this.prisma.channel.findFirst({where:{id:prefs.channelId||'',tenantId:sender.tenantId,status:'CONNECTED',tenant:{status:'ACTIVE'}}});
     if(!channel || !prefs.phone)throw new Error('WHATSAPP_CONFIG_REQUIRED');
+    if(cycle.isTest && channel.type!=='QR_EVOLUTION'){await this.skip(id,'SANDBOX_EVOLUTION_ONLY');return;}
     if(channel.type==='OFFICIAL_META' && !process.env.BILLING_WHATSAPP_TEMPLATE_NAME)throw new Error('META_TEMPLATE_REQUIRED');
     conversation=await this.conversations.start(sender.tenantId,{channelId:channel.id,phone:prefs.phone,name:sub.tenant.name});
    }
