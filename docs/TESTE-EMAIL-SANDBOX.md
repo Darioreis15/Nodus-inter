@@ -59,3 +59,21 @@ Content-Type: application/json
 Resposta: `test`, `cycleId`, `paymentId`, `invoiceUrl`, `valueCents`, `dueDate`, `emailState` e `error`. Um HTTP de sucesso não confirma entrega à caixa de entrada.
 
 A rota regular `/billing/calendar/run` mantém o calendário normal e não força emissão fora de data. O teste acima não depende de antecipar esse calendário.
+
+
+## Teste da mesma cobrança por WhatsApp (Evolution)
+
+Após o merge e deploy, publique também os três arquivos de `frontend/owner` na pasta `owner` da Hostinger. A migração adiciona `billing_deliveries.test_target`; o start command habitual `prisma migrate deploy` a aplica.
+
+1. Mantenha Asaas Sandbox e `BILLING_SANDBOX_TEST_ENABLED=true`, `BILLING_DELIVERY_ENABLED=true`.
+2. Abra Owner → empresa com contrato → Avisos de cobrança.
+3. Salve o envio por WhatsApp com um número de teste sob seu controle (código do país + DDD + número) e um canal Evolution conectado da Nodus. Use um número de destino diferente do remetente.
+4. Gere primeiro o teste por e-mail se ainda não existir. O teste WhatsApp reutiliza a última cobrança Sandbox criada desse contrato, inclusive de outro dia, sem emitir outra nem reenviar o e-mail.
+5. Preencha novamente sua senha de proprietário e clique em **Enviar / consultar teste no WhatsApp**. Confira o destinatário na confirmação.
+6. Verifique a mensagem no celular e o link da cobrança Sandbox de R$ 5. Não pague. `SENT` indica aceitação pelo provedor; confirme o recebimento no aparelho.
+
+O botão só habilita com avisos ativos, destinatário salvo, canal Evolution conectado e cobrança de teste existente. Cobranças pagas/removidas não são enviadas. Meta não participa deste teste.
+
+A autorização registra o número e canal. Mudanças posteriores não redirecionam esse teste. Repetições não reiniciam envios aceitos ou incertos; `REVIEW` exige conferência no provedor antes de qualquer liberação manual. A rotina mensal dia 1 / vencimento dia 10 permanece separada.
+
+Rota Owner: `POST /owner/tenants/:id/sandbox-whatsapp`, JWT do proprietário, com `currentPassword`, `confirmation: "SANDBOX_WHATSAPP"`, `cycleId`, `expectedPhone` e `expectedChannelId`. Não cria cobranças. O `cycleId` aparece em `sandboxTest` no GET de configuração dos avisos.

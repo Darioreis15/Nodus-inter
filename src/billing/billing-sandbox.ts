@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { IsEmail, IsIn, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertPlatformOwner } from '../owner/owner-access';
@@ -13,6 +13,14 @@ export class SandboxBillingDto {
   @IsIn(['SANDBOX_EMAIL']) confirmation: string;
   @Matches(/^\d{4}-\d{2}-\d{2}$/) date: string;
   @IsEmail() @MaxLength(254) expectedEmail: string;
+}
+
+export class SandboxWhatsappDto {
+  @IsString() @MinLength(1) @MaxLength(4096) currentPassword: string;
+  @IsIn(['SANDBOX_WHATSAPP']) confirmation: string;
+  @IsUUID() cycleId: string;
+  @Matches(/^[1-9]\d{7,14}$/) expectedPhone: string;
+  @IsUUID() expectedChannelId: string;
 }
 
 @Injectable()
@@ -93,6 +101,46 @@ export class BillingSandbox {
       if (error instanceof ConflictException) throw error;
       throw new ConflictException('Teste sem confirmacao. Consulte o historico e repita o mesmo teste para conciliar, sem criar outra cobranca.');
     }
+  }
+  async whatsapp(tenantId: string, actorId: string, dto: SandboxWhatsappDto) {
+    const enabled = () => {
+      if (!sandboxBillingAvailable() || process.env.BILLING_DELIVERY_ENABLED !== 'true') throw new ForbiddenException('Ative o teste e os avisos no ambiente Sandbox.');
+    };
+    enabled();
+    if (dto.confirmation !== 'SANDBOX_WHATSAPP') throw new BadRequestException('Confirme o teste de WhatsApp Sandbox.');
+    const actor = await this.prisma.user.findUnique({ where: { id: actorId } });
+    assertPlatformOwner(actor || undefined);
+    if (!actor || !await bcrypt.compare(dto.currentPassword, actor.passwordHash)) throw new ForbiddenException('Senha incorreta.');
+    const deliveryId = await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
+      enabled();
+      const currentActor = await tx.user.findUnique({ where: { id: actorId } });
+      assertPlatformOwner(currentActor || undefined);
+      if (currentActor?.passwordHash !== actor.passwordHash || currentActor.tokenVersion !== actor.tokenVersion) throw new ForbiddenException('Entre novamente.');
+      const sub = await tx.subscription.findUnique({ where: { tenantId } });
+      if (!sub) throw new NotFoundException('Contrato nao encontrado.');
+      const prefs = sub.deliverySettings as any;
+      if (sub.status === 'CANCELED' || sub.cancellationPending || !sub.deliveryEnabled || !prefs?.whatsappEnabled || prefs.phone !== dto.expectedPhone || prefs.channelId !== dto.expectedChannelId) throw new ConflictException('Salve o celular e o canal de WhatsApp e atualize a tela.');
+      const channel = await tx.channel.findFirst({ where: { id: dto.expectedChannelId, tenantId: currentActor.tenantId, type: 'QR_EVOLUTION', status: 'CONNECTED', tenant: { status: 'ACTIVE' } } });
+      if (!channel) throw new ConflictException('Selecione um canal Evolution conectado da propria Nodus.');
+      const cycle = await tx.billingCycle.findFirst({ where: { id: dto.cycleId, subscriptionId: sub.id, isTest: true, state: 'CREATED', paymentId: { not: null }, valueCents: 500 } });
+      if (!cycle) throw new NotFoundException('Cobranca Sandbox nao encontrada. Gere o teste por e-mail primeiro.');
+      const row = await tx.billingDelivery.findUnique({ where: { cycleId_kind: { cycleId: cycle.id, kind: 'WHATSAPP' } } });
+      if (!row) throw new ConflictException('Registro de envio nao encontrado. Atualize o teste por e-mail.');
+      const target = { phone: dto.expectedPhone, channelId: dto.expectedChannelId };
+      if (row.testTarget) {
+        const saved = row.testTarget as any;
+        if (saved.phone !== target.phone || saved.channelId !== target.channelId) throw new ConflictException('Este teste ja foi autorizado para outro destino. Consulte o historico.');
+        return row.id; // Never reset SENT, SENDING, REVIEW or a skipped payment.
+      }
+      if (row.state !== 'SKIPPED' || row.error !== 'SANDBOX_EMAIL_ONLY') throw new ConflictException('Envio ja processado ou em revisao. Consulte o historico.');
+      await tx.billingDelivery.update({ where: { id: row.id }, data: { testTarget: target, state: 'QUEUED', error: null, nextAttemptAt: new Date() } });
+      await tx.auditEvent.create({ data: { tenantId, actorId, action: `billing.sandbox.whatsapp_authorized:${cycle.id}` } });
+      return row.id;
+    });
+    await this.delivery.process(deliveryId);
+    const result = await this.prisma.billingDelivery.findUniqueOrThrow({ where: { id: deliveryId } });
+    return { test: true, cycleId: dto.cycleId, whatsappState: result.state, error: result.error };
   }
   private assertEnabled() {
     if (!sandboxBillingAvailable()) throw new ForbiddenException('Teste disponivel apenas no Asaas Sandbox com BILLING_SANDBOX_TEST_ENABLED=true.');

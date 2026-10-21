@@ -123,7 +123,7 @@ $('companyForm').onsubmit=async event=>{
 
 let deliverySelection=null, deliveryBusy=false, sandboxTest=null;
 const deliveryLabels={QUEUED:'Na fila',RETRY:'Aguardando nova tentativa',SENDING:'Enviando',SENT:'Aceito pelo provedor / confirmado',REVIEW:'Revisão necessária',SKIPPED:'Não enviado'};
-const deliveryErrors={SANDBOX_DISABLED:'Teste desativado ou ambiente fora do Sandbox',SANDBOX_EMAIL_ONLY:'Teste exclusivo por e-mail',DISABLED:'Envio desativado ou contrato encerrado',BEFORE_ACTIVATION:'Cobrança anterior à ativação',PAYMENT_NOT_OPEN:'Cobrança paga, removida ou não disponível para pagamento',PAYMENT_MISMATCH:'Dados da cobrança divergentes',LINK_UNAVAILABLE:'Link da cobrança indisponível',EMAIL_CONFIG_REQUIRED:'Configure o e-mail no servidor e no contrato',WHATSAPP_CONFIG_REQUIRED:'Confira o canal conectado e o celular',META_TEMPLATE_REQUIRED:'Configure um modelo aprovado da Meta',DELIVERY_UNCERTAIN:'O provedor pode ter recebido. Confira antes de repetir',PREFLIGHT_UNAVAILABLE:'Não foi possível conferir os dados antes do envio'};
+const deliveryErrors={SANDBOX_TARGET_CHANGED:'Destino do teste alterado; envio bloqueado',SANDBOX_EVOLUTION_ONLY:'Teste disponível somente via Evolution',SANDBOX_DISABLED:'Teste desativado ou ambiente fora do Sandbox',SANDBOX_EMAIL_ONLY:'Teste exclusivo por e-mail',DISABLED:'Envio desativado ou contrato encerrado',BEFORE_ACTIVATION:'Cobrança anterior à ativação',PAYMENT_NOT_OPEN:'Cobrança paga, removida ou não disponível para pagamento',PAYMENT_MISMATCH:'Dados da cobrança divergentes',LINK_UNAVAILABLE:'Link da cobrança indisponível',EMAIL_CONFIG_REQUIRED:'Configure o e-mail no servidor e no contrato',WHATSAPP_CONFIG_REQUIRED:'Confira o canal conectado e o celular',META_TEMPLATE_REQUIRED:'Configure um modelo aprovado da Meta',DELIVERY_UNCERTAIN:'O provedor pode ter recebido. Confira antes de repetir',PREFLIGHT_UNAVAILABLE:'Não foi possível conferir os dados antes do envio'};
 async function openDelivery(company){
   if(deliveryBusy)return;deliveryBusy=true;$('notice').textContent='Carregando avisos…';
   try {
@@ -131,7 +131,10 @@ async function openDelivery(company){
     deliverySelection=company;$('deliveryForm').reset();$('deliveryCompany').textContent=company.name;
     $('deliveryReadiness').textContent=`Processamento ${data.workerEnabled?'ativado':'desativado no servidor'} · E-mail ${data.emailReady?'configurado':'pendente'} · Modelo Meta ${data.metaTemplateReady?'configurado':'pendente (apenas API oficial)'}`;
     const prefs=data.settings||{};
-    sandboxTest={...data.sandboxTest,email:prefs.email};
+    sandboxTest={...data.sandboxTest,email:prefs.email,phone:prefs.phone,channelId:prefs.channelId};
+    const testChannel=data.channels.find(channel=>channel.id===prefs.channelId);
+    $('sandboxWhatsapp').disabled=!(sandboxTest.available&&sandboxTest.cycleId&&data.workerEnabled&&data.enabled&&prefs.whatsappEnabled&&prefs.phone&&testChannel?.type==='QR_EVOLUTION'&&testChannel?.status==='CONNECTED');
+    $('sandboxWhatsappInfo').textContent=sandboxTest.cycleId?`WhatsApp: reutiliza a última cobrança de teste, sem gerar outra nem reenviar e-mail. Destino salvo: ${prefs.phone||'não configurado'} · canal: ${testChannel?.name||'não configurado'}. Use um número sob seu controle e um canal Evolution conectado.`:'Gere primeiro o teste por e-mail para habilitar o envio da mesma cobrança por WhatsApp.';
     $('sandboxBillingSection').hidden=!sandboxTest.available;
     $('sandboxBilling').disabled=!(data.workerEnabled&&data.emailReady&&data.enabled&&prefs.emailEnabled&&prefs.email);
     $('sandboxBillingInfo').textContent=`Teste de ${money(sandboxTest.valueCents||500)} · e-mail salvo: ${prefs.email||'não configurado'} · um teste por empresa/dia. Salve a configuração antes de testar.`;
@@ -185,4 +188,20 @@ $('sandboxBilling').onclick=async()=>{
     $('sandboxBillingResult').textContent=`Cobrança de teste registrada. E-mail: ${deliveryLabels[result.emailState]||result.emailState}. Confira sua caixa de entrada e o spam. ${result.error?(deliveryErrors[result.error]||'Confira o histórico.') : ''}`;
   }catch(error){$('sandboxBillingResult').textContent=error.message;}
   finally{deliveryBusy=false;$('sandboxBilling').disabled=false;$('saveDelivery').disabled=false;$('deliveryPassword').value='';}
+};
+
+$('sandboxWhatsapp').onclick=async()=>{
+  if(deliveryBusy||!deliverySelection||!sandboxTest?.available||!sandboxTest.cycleId)return;
+  const password=$('deliveryPassword').value;
+  if(!password){$('sandboxBillingResult').textContent='Preencha sua senha de proprietário no campo acima.';$('deliveryPassword').focus();return;}
+  const company=deliverySelection,snapshot={...sandboxTest};
+  if(!confirm(`Enviar a cobrança Sandbox existente para ${snapshot.phone} pelo canal salvo? Confirme que esse número está sob seu controle. Não será gerada outra cobrança nem reenviado o e-mail. Um envio já aceito não será repetido.`))return;
+  deliveryBusy=true;$('sandboxWhatsapp').disabled=true;$('sandboxBilling').disabled=true;$('saveDelivery').disabled=true;
+  try{
+    const result=await api(`/owner/tenants/${encodeURIComponent(company.id)}/sandbox-whatsapp`,{method:'POST',body:JSON.stringify({currentPassword:password,confirmation:'SANDBOX_WHATSAPP',cycleId:snapshot.cycleId,expectedPhone:snapshot.phone,expectedChannelId:snapshot.channelId})});
+    deliveryBusy=false;await openDelivery(company);
+    if(!token||deliverySelection?.id!==company.id)return;
+    $('sandboxBillingResult').textContent=`Teste WhatsApp: ${deliveryLabels[result.whatsappState]||result.whatsappState}. Confira o celular de destino. ${result.error?(deliveryErrors[result.error]||'Confira o histórico antes de repetir.') : ''}`;
+  }catch(error){$('sandboxBillingResult').textContent=error.message;}
+  finally{deliveryBusy=false;$('saveDelivery').disabled=false;$('deliveryPassword').value='';}
 };

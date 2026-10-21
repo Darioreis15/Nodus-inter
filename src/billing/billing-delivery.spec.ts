@@ -38,4 +38,30 @@ describe('Billing delivery',()=>{
   await service.process(row.id);expect(conversations.sendMessage).not.toHaveBeenCalled();
  });
 
+ it('sends an explicitly authorized sandbox WhatsApp once without email',async()=>{
+  row.kind='WHATSAPP';row.cycle.isTest=true;row.testTarget={phone:sub.deliverySettings.phone,channelId:sub.deliverySettings.channelId};
+  process.env.BILLING_SANDBOX_TEST_ENABLED='true';process.env.ASAAS_BASE_URL='https://api-sandbox.asaas.com/v3';
+  await Promise.all([service.process(row.id),service.process(row.id)]);
+  await service.process(row.id);
+  expect(conversations.sendMessage).toHaveBeenCalledTimes(1);
+  expect(conversations.sendMessage).toHaveBeenCalledWith('nodus','conversation',expect.stringContaining('não efetue pagamento real'),false);
+  expect(fetchMock).not.toHaveBeenCalled();expect(row.state).toBe('SENT');
+ });
+ it('blocks a changed sandbox recipient and Meta test channel',async()=>{
+  row.kind='WHATSAPP';row.cycle.isTest=true;row.testTarget={phone:'other',channelId:'channel'};
+  process.env.BILLING_SANDBOX_TEST_ENABLED='true';process.env.ASAAS_BASE_URL='https://api-sandbox.asaas.com/v3';
+  await service.process(row.id);expect(row.error).toBe('SANDBOX_TARGET_CHANGED');
+  row.state='QUEUED';row.testTarget.phone=sub.deliverySettings.phone;
+  prisma.channel.findFirst.mockResolvedValue({type:'OFFICIAL_META'});
+  await service.process(row.id);expect(row.error).toBe('SANDBOX_EVOLUTION_ONLY');
+  expect(conversations.sendMessage).not.toHaveBeenCalled();expect(conversations.sendTemplate).not.toHaveBeenCalled();
+ });
+ it('does not automatically repeat an uncertain WhatsApp send',async()=>{
+  row.kind='WHATSAPP';row.cycle.isTest=true;row.testTarget={phone:sub.deliverySettings.phone,channelId:'channel'};
+  process.env.BILLING_SANDBOX_TEST_ENABLED='true';process.env.ASAAS_BASE_URL='https://api-sandbox.asaas.com/v3';
+  conversations.sendMessage.mockRejectedValueOnce(new Error('timeout'));
+  await service.process(row.id);await service.process(row.id);
+  expect(row.state).toBe('REVIEW');expect(conversations.sendMessage).toHaveBeenCalledTimes(1);
+ });
+
 });
