@@ -164,7 +164,7 @@ export class BillingCalendar implements OnModuleInit, OnModuleDestroy {
     if (!match) return { ok: true };
     const [, id, month] = match;
     const cycle = await this.prisma.billingCycle.findUnique({ where: { subscriptionId_month: { subscriptionId: id, month } }, include: { subscription: true } });
-    if (!cycle || cycle.subscription.asaasCustomerId !== payment.customer) return { ok: true };
+    if (!cycle || cycle.isTest || cycle.subscription.asaasCustomerId !== payment.customer) return { ok: true };
     await this.record(cycle.id, payment, payment.customer, payment.externalReference);
     await this.reconcileStatus(id);
     return { ok: true };
@@ -174,7 +174,7 @@ export class BillingCalendar implements OnModuleInit, OnModuleDestroy {
     await this.prisma.$transaction(async tx => {
       const snap = await tx.subscription.findUniqueOrThrow({ where: { id } });
       await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${snap.tenantId} FOR UPDATE`;
-      const sub = await tx.subscription.findUniqueOrThrow({ where: { id }, include: { billingCycles: true } });
+      const sub = await tx.subscription.findUniqueOrThrow({ where: { id }, include: { billingCycles: { where: { isTest: false } } } });
       if (sub.status === 'CANCELED') return;
       const all = await this.asaas.allPayments({ customer: sub.asaasCustomerId });
       const owned = all.filter(p => !p.deleted && ((sub.asaasSubscriptionId && p.subscription === sub.asaasSubscriptionId) || sub.billingCycles.some(c => c.paymentId === p.id)));

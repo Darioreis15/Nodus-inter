@@ -49,4 +49,13 @@ describe('Monthly billing calendar', () => {
     const result=await new BillingService(prisma,asaas,service).subscribe('tenant',{cpfCnpj:'12345678909'});
     expect(result).toMatchObject({scheduled:true,invoiceUrl:null});expect(asaas.createSubscription).not.toHaveBeenCalled();expect(asaas.createCalendarPayment).not.toHaveBeenCalled();
   });
+  it('ignores test payment webhooks and excludes test debt from contract status',async()=>{
+    asaas.getPayment.mockResolvedValue({id:'test',customer:'cus',externalReference:billingReference(id,'test-2026-10-20'),status:'OVERDUE'});
+    await service.reconcilePayment('test');expect(prisma.billingCycle.update).not.toHaveBeenCalled();expect(prisma.tenant.update).not.toHaveBeenCalled();
+    asaas.allPayments.mockResolvedValue([{id:'test',status:'OVERDUE'},{id:'normal',subscription:'sub',status:'RECEIVED'}]);
+    await service.reconcileStatus(id);
+    expect(prisma.subscription.findUniqueOrThrow).toHaveBeenCalledWith({where:{id},include:{billingCycles:{where:{isTest:false}}}});
+    expect(prisma.tenant.update).toHaveBeenCalledWith({where:{id:'tenant'},data:{status:'ACTIVE'}});
+  });
+
 });

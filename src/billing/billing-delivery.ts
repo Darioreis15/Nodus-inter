@@ -1,3 +1,5 @@
+import { sandboxBillingAvailable } from './sandbox-config';
+import { saoPauloDate } from './billing-calendar';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import * as bcrypt from 'bcryptjs';
@@ -40,9 +42,10 @@ export class BillingDelivery implements OnModuleInit,OnModuleDestroy {
  async config(tenantId:string,actorId:string){
   const actor=await this.owner(actorId);
   const sub=await this.prisma.subscription.findUnique({where:{tenantId}});if(!sub)throw new NotFoundException('Contrato nao encontrado.');
-  const history=await this.prisma.billingDelivery.findMany({where:{cycle:{subscriptionId:sub.id}},orderBy:{createdAt:'desc'},take:30,select:{id:true,kind:true,state:true,error:true,attemptedAt:true,updatedAt:true,cycle:{select:{month:true,dueDate:true}}}});
+  const history=await this.prisma.billingDelivery.findMany({where:{cycle:{subscriptionId:sub.id}},orderBy:{createdAt:'desc'},take:30,select:{id:true,kind:true,state:true,error:true,attemptedAt:true,updatedAt:true,cycle:{select:{month:true,dueDate:true,isTest:true}}}});
   const channels=await this.prisma.channel.findMany({where:{tenantId:actor.tenantId},select:{id:true,name:true,type:true,status:true}});
-  return {enabled:sub.deliveryEnabled,settings:sub.deliverySettings,billingType:(sub.billingOptions as any)?.billingType||'UNDEFINED',history,channels,workerEnabled:process.env.BILLING_DELIVERY_ENABLED==='true',emailReady:!!(process.env.RESEND_API_KEY&&process.env.MAIL_FROM),metaTemplateReady:!!process.env.BILLING_WHATSAPP_TEMPLATE_NAME};
+  const pendingTest=await this.prisma.billingCycle.findFirst({where:{subscriptionId:sub.id,isTest:true,state:'SENDING'},orderBy:{createdAt:'asc'}});
+  return {sandboxTest:{available:sandboxBillingAvailable(),date:pendingTest?.month.slice(5)||saoPauloDate(),valueCents:500},enabled:sub.deliveryEnabled,settings:sub.deliverySettings,billingType:(sub.billingOptions as any)?.billingType||'UNDEFINED',history,channels,workerEnabled:process.env.BILLING_DELIVERY_ENABLED==='true',emailReady:!!(process.env.RESEND_API_KEY&&process.env.MAIL_FROM),metaTemplateReady:!!process.env.BILLING_WHATSAPP_TEMPLATE_NAME};
  }
  async save(tenantId:string,actorId:string,dto:BillingDeliveryDto){
   const actor=await this.owner(actorId,dto.currentPassword);
@@ -75,7 +78,7 @@ export class BillingDelivery implements OnModuleInit,OnModuleDestroy {
   if(process.env.BILLING_DELIVERY_ENABLED!=='true')return {enabled:false};if(this.running)return {running:true};this.running=true;
   try{
    await this.prisma.billingDelivery.updateMany({where:{state:'SENDING',attemptedAt:{lt:new Date(Date.now()-15*60000)}},data:{state:'REVIEW',error:'DELIVERY_UNCERTAIN'}});
-   const cycles=await this.prisma.billingCycle.findMany({where:{state:'CREATED',paymentId:{not:null},deliveries:{none:{}},subscription:{deliveryEnabled:true,status:{not:'CANCELED'}}},include:{subscription:true},orderBy:{createdAt:'asc'},take:100});
+   const cycles=await this.prisma.billingCycle.findMany({where:{isTest:false,state:'CREATED',paymentId:{not:null},deliveries:{none:{}},subscription:{deliveryEnabled:true,status:{not:'CANCELED'}}},include:{subscription:true},orderBy:{createdAt:'asc'},take:100});
    for(const cycle of cycles){
     const prefs=cycle.subscription.deliverySettings as any;const eligible=Number.isFinite(Date.parse(prefs.enabledAt))&&cycle.createdAt.getTime()>=Date.parse(prefs.enabledAt);
     await this.prisma.billingDelivery.createMany({skipDuplicates:true,data:['EMAIL','WHATSAPP'].map(kind=>({cycleId:cycle.id,kind,state:eligible && (kind==='EMAIL'?prefs.emailEnabled:prefs.whatsappEnabled)?'QUEUED':'SKIPPED',error:eligible?null:'BEFORE_ACTIVATION'}))});
@@ -91,13 +94,14 @@ export class BillingDelivery implements OnModuleInit,OnModuleDestroy {
   const cycle=row.cycle,sub=cycle.subscription,prefs=sub.deliverySettings as any;
   let claimed=false;
   try{
+   if(cycle.isTest && (!sandboxBillingAvailable() || process.env.BILLING_DELIVERY_ENABLED!=='true' || row.kind!=='EMAIL')){await this.skip(id,'SANDBOX_DISABLED');return;}
    if(!sub.deliveryEnabled || sub.status==='CANCELED'||sub.cancellationPending || !(row.kind==='EMAIL'?prefs.emailEnabled:prefs.whatsappEnabled)){await this.skip(id,'DISABLED');return;}
    const payment=await this.asaas.getPayment(cycle.paymentId!);
    if(!verifiedPayment(payment,cycle,sub)){await this.skip(id,'PAYMENT_NOT_OPEN');return;}
    const link=safeBillingLink(payment.invoiceUrl); // One safe hosted invoice works for boleto/PIX; no arbitrary URL downloads.
    const value=new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(payment.value);
    const due=payment.dueDate.split('-').reverse().join('/');
-   const text=`Olá, ${sub.tenant.name}! Sua mensalidade Nodus de ${value} vence em ${due}.\nAcesse sua cobrança e o boleto disponível: ${link}\nSe já efetuou o pagamento, aguarde a compensação.`;
+   const text=(cycle.isTest?'TESTE EM HOMOLOGAÇÃO — não efetue pagamento real.\n':'')+`Olá, ${sub.tenant.name}! Sua mensalidade Nodus de ${value} vence em ${due}.\nAcesse sua cobrança e o boleto disponível: ${link}\nSe já efetuou o pagamento, aguarde a compensação.`;
    let sender:any,channel:any,conversation:any;
    if(row.kind==='EMAIL'){
     if(!prefs.email || !process.env.RESEND_API_KEY || !process.env.MAIL_FROM)throw new Error('EMAIL_CONFIG_REQUIRED');
@@ -118,7 +122,7 @@ export class BillingDelivery implements OnModuleInit,OnModuleDestroy {
    if(!reserved.count)return;claimed=true;
    let providerId:string;
    if(row.kind==='EMAIL'){
-    const response=await fetch('https://api.resend.com/emails',{method:'POST',redirect:'error',signal:AbortSignal.timeout(15000),headers:{Authorization:`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json','Idempotency-Key':`nodus-billing-${row.id}`},body:JSON.stringify({from:process.env.MAIL_FROM,to:[prefs.email],subject:`Mensalidade Nodus — vencimento ${due}`,text})});
+    const response=await fetch('https://api.resend.com/emails',{method:'POST',redirect:'error',signal:AbortSignal.timeout(15000),headers:{Authorization:`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json','Idempotency-Key':`nodus-billing-${row.id}`},body:JSON.stringify({from:process.env.MAIL_FROM,to:[prefs.email],subject:`${cycle.isTest?'[TESTE SANDBOX] ':''}Mensalidade Nodus — vencimento ${due}`,text})});
     const data=await response.json().catch(()=>null);if(!response.ok||typeof data?.id!=='string')throw new Error('DELIVERY_UNCERTAIN');providerId=data.id;
    }else{
     const message=channel.type==='OFFICIAL_META'?await this.conversations.sendTemplate(sender.tenantId,conversation.id,{name:process.env.BILLING_WHATSAPP_TEMPLATE_NAME!,language:process.env.BILLING_WHATSAPP_TEMPLATE_LANGUAGE||'pt_BR',parameters:[sub.tenant.name,value,due,link]},false):await this.conversations.sendMessage(sender.tenantId,conversation.id,text,false);

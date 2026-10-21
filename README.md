@@ -353,3 +353,7 @@ Consulte [COBRANCAS-E-ANEXOS-API.md](docs/COBRANCAS-E-ANEXOS-API.md) para config
 ## Fila da API, templates PDF e documentos Office
 
 Consulte [API-FILA-TEMPLATES-E-DOCUMENTOS.md](docs/API-FILA-TEMPLATES-E-DOCUMENTOS.md) para ativação, limites, Postman e homologação. A fila fica desativada por padrão. Inclui runner opcional no Contabo sem Docker.
+
+### Teste de e-mail de cobrança no Sandbox
+
+O Owner permite emitir uma cobrança isolada de R$ 5,00 no Sandbox e validar seu aviso por e-mail, sem alterar mensalidades. Consulte [TESTE-EMAIL-SANDBOX.md](docs/TESTE-EMAIL-SANDBOX.md) para publicação e teste. Exige `BILLING_SANDBOX_TEST_ENABLED=true`, configuração Resend e a URL exata do Sandbox.

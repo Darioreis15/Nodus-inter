@@ -350,6 +350,7 @@ model CampaignSuppression {
 }
 
 model BillingCycle {
+  isTest Boolean @default(false) @map("is_test")
   deliveries BillingDelivery[]
   id String @id @default(uuid())
   subscriptionId String @map("subscription_id")

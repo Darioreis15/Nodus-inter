@@ -1,3 +1,4 @@
+import { BillingSandbox, SandboxBillingDto } from '../billing/billing-sandbox';
 import { BillingDelivery, BillingDeliveryDto, DeliveryReviewDto } from '../billing/billing-delivery';
 import { UsersModule } from '../users/users.module';
 import { OwnerCompaniesService } from './owner-companies.service';
@@ -78,7 +79,9 @@ export class OwnerService {
 @Controller('owner')
 @UseGuards(JwtAuthGuard, OwnerGuard)
 export class OwnerController {
-  constructor(private service: OwnerService, private prisma: PrismaService, private billing: BillingService, private calendar: BillingCalendar, private activation: BillingActivation, private companies: OwnerCompaniesService, private delivery: BillingDelivery) {}
+  constructor(private service: OwnerService, private prisma: PrismaService, private billing: BillingService, private calendar: BillingCalendar, private activation: BillingActivation, private companies: OwnerCompaniesService, private delivery: BillingDelivery, private sandbox: BillingSandbox) {}
+  @Post('tenants/:id/sandbox-billing') @AllowSuspendedTenant()
+  sandboxBilling(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: SandboxBillingDto) { return this.sandbox.issue(id, user.userId, dto); }
   @Get('tenants/:id/delivery') @AllowSuspendedTenant()
   deliveryConfig(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) { return this.delivery.config(id, user.userId); }
   @Patch('tenants/:id/delivery') @AllowSuspendedTenant()
@@ -101,7 +104,7 @@ export class OwnerController {
     const [enabledContracts, migrationPending, emissionPending] = await Promise.all([
       this.prisma.subscription.count({ where: { calendarEnabled: true, status: { not: 'CANCELED' } } }),
       this.prisma.subscription.count({ where: { calendarEnabled: false, status: 'ACTIVE', tenant: { status: 'ACTIVE' } } }),
-      this.prisma.billingCycle.count({ where: { state: 'SENDING' } }),
+      this.prisma.billingCycle.count({ where: { state: 'SENDING', isTest: false } }),
     ]);
     return { enabled: process.env.BILLING_CALENDAR_ENABLED === 'true', issueDay: 1, dueDay: 10, timezone: 'America/Sao_Paulo', enabledContracts, migrationPending, emissionPending };
   }

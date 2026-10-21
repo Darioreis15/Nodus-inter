@@ -69,7 +69,7 @@ export class BillingActivation {
       assertPlatformOwner(currentActor || undefined);
       if (currentActor?.passwordHash !== actor.passwordHash || currentActor.tokenVersion !== actor.tokenVersion) throw new ForbiddenException('Entre novamente.');
       const tenant = await tx.tenant.findUnique({ where: { id: tenantId } });
-      const sub = await tx.subscription.findUnique({ where: { tenantId }, include: { billingCycles: true } });
+      const sub = await tx.subscription.findUnique({ where: { tenantId }, include: { billingCycles: { where: { isTest: false } } } });
       if (!tenant || !sub) throw new NotFoundException('Empresa sem contrato. Cadastre a assinatura antes de ativar.');
       if (sub.cancellationPending) throw new ConflictException('Conclua o cancelamento pendente antes de reativar.');
       if (sub.status === 'ACTIVE' && tenant.status === 'ACTIVE') return { ok: true, alreadyActive: true };
