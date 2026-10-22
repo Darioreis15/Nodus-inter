@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards, Req, Module } from '@nestjs/common';
+import { NodusResponseInterceptor } from '../public-api/nodus-response';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseInterceptors, UseGuards, Req, Module } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -19,7 +20,8 @@ export class CampaignsController {
   @Get(':id') detail(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Query('cursor') cursor?: string) { return this.service.detail(user.tenantId,id,cursor); }
   @Patch(':id') state(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: CampaignStateDto) { return this.service.state(user.tenantId,id,dto.state); }
 }
-@Controller('public/v1/campaigns') @UseGuards(ApiKeyGuard)
+@UseInterceptors(NodusResponseInterceptor)
+@Controller(['public/v1/campaigns','public/v2/campaigns']) @UseGuards(ApiKeyGuard)
 export class PublicCampaignsController {
   constructor(private service: CampaignsService) {}
   @Get() list(@CurrentApiTenant() tenantId: string) { return this.service.list(tenantId); }

@@ -10,7 +10,7 @@ import { ConversationsService } from '../conversations/conversations.service';
 import { ApiKeyGuard } from './guards/api-key.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { RateGuard } from '../security/rate.guard';
-describe('Delivery HTTP contracts',()=>{
+describe.each(['v1','v2'])('Delivery HTTP contracts %s',(version)=>{
  let app:INestApplication,enqueue:jest.Mock,send:jest.Mock,owned:jest.Mock,rate:jest.Mock;
  beforeAll(async()=>{
   process.env.API_QUEUE_ENABLED='true';enqueue=jest.fn().mockResolvedValue({id:'job',state:'QUEUED'});send=jest.fn().mockResolvedValue({id:'message'});owned=jest.fn().mockResolvedValue({id:'c'});rate=jest.fn();
@@ -19,7 +19,7 @@ describe('Delivery HTTP contracts',()=>{
  });
  afterAll(async()=>{delete process.env.API_QUEUE_ENABLED;await app.close();});
  beforeEach(()=>{enqueue.mockClear();send.mockClear();});
- const queue=()=>request(app.getHttpServer()).post('/public/v1/conversations/c/deliveries').set('Idempotency-Key','fatura-123');
+ const queue=()=>request(app.getHttpServer()).post(`/public/${version}/conversations/c/deliveries`).set('Idempotency-Key','fatura-123');
  it('accepts JSON text and returns 202 with the source key hash',async()=>{
   await queue().send({kind:'TEXT',text:'Teste'}).expect(202);expect(enqueue).toHaveBeenCalledWith('tenant','c','fatura-123','hashed-key',expect.objectContaining({text:'Teste'}),undefined);
  });
@@ -28,12 +28,12 @@ describe('Delivery HTTP contracts',()=>{
   expect(enqueue.mock.calls[0][4].parameters).toEqual(['Cliente','99,00']);expect(enqueue.mock.calls[0][5].mimetype).toBe('application/pdf');
  });
  it('supports PDF at the existing template route and preserves JSON clients',async()=>{
-  await request(app.getHttpServer()).post('/public/v1/conversations/c/template').set('Idempotency-Key','fatura-123').field('name','boleto').field('language','pt_BR').field('parameters','["Cliente"]').attach('file',Buffer.from('%PDF-1.7'),{filename:'boleto.pdf',contentType:'application/pdf'}).expect(201);
+  await request(app.getHttpServer()).post(`/public/${version}/conversations/c/template`).set('Idempotency-Key','fatura-123').field('name','boleto').field('language','pt_BR').field('parameters','["Cliente"]').attach('file',Buffer.from('%PDF-1.7'),{filename:'boleto.pdf',contentType:'application/pdf'}).expect(201);
   expect(send.mock.calls[0][2].parameters).toEqual(['Cliente']);
-  await request(app.getHttpServer()).post('/public/v1/conversations/c/template').send({name:'hello_world',language:'en_US',parameters:[]}).expect(201);
+  await request(app.getHttpServer()).post(`/public/${version}/conversations/c/template`).send({name:'hello_world',language:'en_US',parameters:[]}).expect(201);
  });
  it('requires keys, rejects malformed parameters and unknown fields',async()=>{
-  await request(app.getHttpServer()).post('/public/v1/conversations/c/deliveries').send({kind:'TEXT',text:'a'}).expect(400);
+  await request(app.getHttpServer()).post(`/public/${version}/conversations/c/deliveries`).send({kind:'TEXT',text:'a'}).expect(400);
   await queue().field('kind','TEMPLATE').field('parameters','bad').expect(400);
   await queue().send({kind:'TEXT',text:'a',fileUrl:'https://bad.example'}).expect(400);
   expect(enqueue).not.toHaveBeenCalled();

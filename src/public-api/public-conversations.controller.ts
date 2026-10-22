@@ -1,3 +1,4 @@
+import { NodusResponseInterceptor } from './nodus-response';
 import { PublicTemplatesService } from './public-templates.service';
 import { DeliveryInput, PublicTemplateDto } from './delivery-input';
 import { AttachmentFile } from '../conversations/attachment-upload';
@@ -10,7 +11,8 @@ import { ConversationsService } from '../conversations/conversations.service';
 import { PublicSendMessageDto } from './dto/send-message.dto';
 
 @UseGuards(ApiKeyGuard)
-@Controller('public/v1/conversations')
+@UseInterceptors(NodusResponseInterceptor)
+@Controller(['public/v1/conversations', 'public/v2/conversations'])
 export class PublicConversationsController {
   constructor(private conversationsService: ConversationsService, private templates:PublicTemplatesService) {}
 
@@ -46,7 +48,8 @@ export class PublicConversationsController {
 }
 
 @UseGuards(ApiKeyGuard)
-@Controller('public/v1/channels')
+@UseInterceptors(NodusResponseInterceptor)
+@Controller(['public/v1/channels', 'public/v2/channels'])
 export class PublicChannelsController {
   constructor(private prisma: PrismaService) {}
   @Get()

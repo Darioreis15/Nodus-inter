@@ -1,3 +1,4 @@
+import { NodusResponseInterceptor } from './nodus-response';
 import { BadRequestException, Body, ConflictException, Controller, Headers, Injectable, Param, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { createHash } from 'crypto';
@@ -34,7 +35,8 @@ export class PublicAttachmentsService {
   }
  }
 }
-@Controller('public/v1/conversations')
+@UseInterceptors(NodusResponseInterceptor)
+@Controller(['public/v1/conversations', 'public/v2/conversations'])
 @UseGuards(ApiKeyGuard)
 export class PublicAttachmentsController {
  constructor(private service:PublicAttachmentsService){}
