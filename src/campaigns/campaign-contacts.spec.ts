@@ -16,7 +16,7 @@ describe('Contatos elegiveis para campanhas',()=>{
   const q=db.contact.findMany.mock.calls[0][0];
   expect(q.where).toEqual({tenantId:'tenant',conversations:{some:{channel:{tenantId:'tenant'},messages:{some:{}},channelId:'channel',departmentId:'dept',funnelStage:'stage'}},OR:[{name:{contains:'Maria',mode:'insensitive'}}]});
   expect(q.take).toBe(51);expect(q.select).toEqual({id:true,name:true,waId:true});
-  expect(db.campaignSuppression.findMany).toHaveBeenCalledWith({where:{tenantId:'tenant',phoneHash:{in:[phoneHash('tenant','5531999999999')]}},select:{phoneHash:true}});
+  expect(db.campaignSuppression.findMany).toHaveBeenCalledWith({where:{tenantId:'tenant',phoneHash:{in:expect.arrayContaining([phoneHash('tenant','5531999999999'),phoneHash('tenant','553199999999')])}},select:{phoneHash:true}});
  });
  it('remove descadastrados e identificadores de grupo; nome pode ser nulo',async()=>{
   const {db,service}=setup([{id:'a',name:'Bloqueado',waId:'5531999999999'},{id:'b',name:null,waId:'5531888888888'},{id:'g',name:'Grupo',waId:'120363045049558686'}]);

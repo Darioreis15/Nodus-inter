@@ -1,3 +1,4 @@
+import { isPhoneSuppressed } from '../conversations/contact-identity';
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -38,8 +39,7 @@ export class DeliveryService {
     if(!inbound)throw new ForbiddenException('Fora da janela Meta. Use template aprovado.');
    }
    if(!await tx.apiKey.findFirst({where:{tenantId,keyHash:apiKeyHash,revokedAt:null},select:{id:true}}))throw new ForbiddenException('Chave de API revogada.');
-   const phoneHash=hash(`${tenantId}:${conversation.contact.waId}`);
-   if(await tx.campaignSuppression.findUnique({where:{tenantId_phoneHash:{tenantId,phoneHash}}}))throw new ForbiddenException('Destinatario solicitou interrupcao de mensagens.');
+   if(await isPhoneSuppressed(tx,tenantId,conversation.contact.waId))throw new ForbiddenException('Destinatario solicitou interrupcao de mensagens.');
    const bytes=Buffer.byteLength(encrypted),tenantQuota=setting('API_QUEUE_TENANT_MIB',128,512)*1024*1024,globalQuota=setting('API_QUEUE_TOTAL_MIB',256,2048)*1024*1024;
    const [tenantUsage,totalUsage]=await Promise.all([
     tx.apiDelivery.aggregate({where:{tenantId},_sum:{payloadBytes:true},_count:true}),

@@ -54,7 +54,7 @@ describe('Customer workspace boundaries', () => {
     expect(asaas.listCustomerPayments).toHaveBeenCalledWith('own-customer',50);
   });
   it('records the actual resolver, not the assigned operator', async () => {
-    const db:any = { conversation:{ findFirst:jest.fn().mockResolvedValue({ assignedUserId:'different' }), update:jest.fn().mockResolvedValue({}) }, user:{ findFirst:jest.fn().mockResolvedValue({ id:'actor', name:'Ana' }) }, auditEvent:{ create:jest.fn() } }; db.$transaction = (f:any) => f(db);
+    const db:any = { $queryRaw:jest.fn(), conversation:{ findFirst:jest.fn().mockResolvedValue({ assignedUserId:'different' }), update:jest.fn().mockResolvedValue({}) }, user:{ findFirst:jest.fn().mockResolvedValue({ id:'actor', name:'Ana' }) }, auditEvent:{ create:jest.fn() } }; db.$transaction = (f:any) => f(db);
     await new ConversationsService(db,unused,unused,unused,unused).updateStatus('own','c','RESOLVED','actor');
     expect(db.conversation.update).toHaveBeenCalledWith(expect.objectContaining({ data:expect.objectContaining({ resolvedById:'actor', resolvedByName:'Ana', resolvedAt:expect.any(Date) }) }));
   });
@@ -114,7 +114,7 @@ describe('Inbound routing and names', () => {
     const conversation:any={id:'conv',status:'OPEN',funnelStage:null};
     const db:any={
       campaignDelivery:{updateMany:jest.fn()}, campaignSuppression:{upsert:jest.fn()},
-      $queryRaw:jest.fn(), contact:{upsert:jest.fn().mockResolvedValue({id:'contact',name:null,waId:'5511999999999'}),updateMany:jest.fn()},
+      $queryRaw:jest.fn(), contact:{findFirst:jest.fn().mockResolvedValue(null),upsert:jest.fn().mockResolvedValue({id:'contact',name:null,waId:'5511999999999'}),updateMany:jest.fn()},
       conversation:{findFirst:jest.fn().mockResolvedValue(null),create:jest.fn().mockResolvedValue(conversation),update:jest.fn(async({data}:any)=>({...conversation,...data}))},
       message:{findFirst:jest.fn().mockResolvedValue(null),create:jest.fn().mockResolvedValue({id:'message'})},
       tenant:{findUniqueOrThrow:jest.fn().mockResolvedValue({status:tenantStatus,workspaceSettings:{timezone:'UTC',businessHours:hours,awayMessage:'Closed',stages:[stage]}})},
