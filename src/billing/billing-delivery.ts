@@ -45,7 +45,7 @@ export class BillingDelivery implements OnModuleInit,OnModuleDestroy {
  async config(tenantId:string,actorId:string){
   const actor=await this.owner(actorId);
   const sub=await this.prisma.subscription.findUnique({where:{tenantId}});if(!sub)throw new NotFoundException('Contrato nao encontrado.');
-  const history=await this.prisma.billingDelivery.findMany({where:{cycle:{subscriptionId:sub.id}},orderBy:{createdAt:'desc'},take:30,select:{id:true,kind:true,state:true,error:true,attemptedAt:true,updatedAt:true,cycle:{select:{month:true,dueDate:true,isTest:true}}}});
+  const history=await this.prisma.billingDelivery.findMany({where:{cycle:{subscriptionId:sub.id}},orderBy:{createdAt:'desc'},take:30,select:{id:true,kind:true,state:true,error:true,attemptedAt:true,updatedAt:true,cycle:{select:{id:true,month:true,dueDate:true,isTest:true}}}});
   const channels=await this.prisma.channel.findMany({where:{tenantId:actor.tenantId},select:{id:true,name:true,type:true,status:true}});
   const pendingTest=await this.prisma.billingCycle.findFirst({where:{subscriptionId:sub.id,isTest:true,state:'SENDING'},orderBy:{createdAt:'asc'}});
   const latestTest=await this.prisma.billingCycle.findFirst({where:{subscriptionId:sub.id,isTest:true,state:'CREATED',paymentId:{not:null},valueCents:500},orderBy:{createdAt:'desc'}});
