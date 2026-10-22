@@ -1,3 +1,4 @@
+import { nextMonth, saoPauloDate } from '../billing/billing-calendar';
 import { BillingSandbox, SandboxBillingDto, SandboxWhatsappDto } from '../billing/billing-sandbox';
 import { BillingDelivery, BillingDeliveryDto, DeliveryReviewDto } from '../billing/billing-delivery';
 import { UsersModule } from '../users/users.module';
@@ -27,7 +28,7 @@ class PlanChange {
   @IsUUID() planId: string;
   @IsUUID() expectedPlanId: string;
   @IsString() @MinLength(1) @MaxLength(4096) currentPassword: string;
-  @IsIn(['ACCESS_ONLY']) confirmation: string;
+  @IsIn(['PLAN_AND_NEXT_MONTH']) confirmation: string;
 }
 @Injectable()
 export class OwnerGuard implements CanActivate {
@@ -50,7 +51,7 @@ export class OwnerService {
     const rows = await this.prisma.tenant.findMany({ where, orderBy: { id: 'asc' }, take: 26,
       select: { id: true, name: true, slug: true, status: true, createdAt: true,
         plan: { select: { id: true, name: true, priceCents: true, maxChannels: true, maxUsers: true } },
-        subscription: { select: { status: true, cancellationPending: true, canceledAt: true, calendarEnabled: true, billingStartMonth: true, billingPriceCents: true, calendarError: true, billingCycles: { where: { error: { not: null } }, select: { month: true, error: true }, take: 5 } } },
+        subscription: { select: { status: true, cancellationPending: true, canceledAt: true, calendarEnabled: true, billingStartMonth: true, billingPriceCents: true, billingOptions: true, calendarError: true, billingCycles: { where: { error: { not: null } }, select: { month: true, error: true }, take: 5 } } },
         _count: { select: { users: true, channels: true } } } });
     return { data: rows.slice(0, 25), nextCursor: rows.length > 25 ? rows[24].id : null };
   }
@@ -70,9 +71,22 @@ export class OwnerService {
       const plan = await tx.plan.findUnique({ where: { id: dto.planId } });
       if (!plan) throw new NotFoundException('Plano nao encontrado.');
       if (tenant._count.users > plan.maxUsers || tenant._count.channels > plan.maxChannels) throw new ConflictException('Uso atual excede os limites do plano escolhido.');
+      if (dto.confirmation !== 'PLAN_AND_NEXT_MONTH') throw new ConflictException('Atualize o painel e confirme a alteracao da proxima mensalidade.');
+      const sub = tenant.subscription;
+      if (sub?.cancellationPending) throw new ConflictException('Conclua o cancelamento pendente.');
+      if (sub && !sub.calendarEnabled) throw new ConflictException('Aguarde a migracao do contrato para o calendario Nodus antes de alterar o plano.');
+      if (!Number.isSafeInteger(plan.priceCents) || plan.priceCents < 500) throw new ConflictException('Plano sem preco de cobranca valido.');
+      const effectiveMonth = nextMonth(saoPauloDate().slice(0,7));
+      if (sub) {
+        const options = (sub.billingOptions || {}) as any;
+        const schedule = Array.isArray(options.planPriceSchedule) ? options.planPriceSchedule : [];
+        await tx.subscription.update({ where: { id: sub.id }, data: { billingOptions: {
+          ...options, planPriceSchedule: [...schedule.filter((c:any)=>c.month!==effectiveMonth), { month:effectiveMonth, priceCents:plan.priceCents, planId:plan.id }],
+        } } });
+      }
       await tx.tenant.update({ where: { id }, data: { planId: plan.id } });
-      await tx.auditEvent.create({ data: { tenantId: id, actorId, action: `owner.plan_access_changed:${tenant.planId}:${plan.id}` } });
-      return { ok: true, billingChanged: false, message: 'Plano de acesso atualizado. Cobrancas e recorrencia existentes permanecem iguais.' };
+      await tx.auditEvent.create({ data: { tenantId: id, actorId, action: `owner.plan_changed:${tenant.planId}:${plan.id}:${effectiveMonth}:${plan.priceCents}` } });
+      return { ok: true, billingChanged: !!sub, effectiveMonth: sub ? effectiveMonth : null, priceCents: plan.priceCents, message: sub ? `Plano atualizado. Novo valor nas mensalidades a partir de ${effectiveMonth}; cobrancas ja emitidas permanecem iguais.` : 'Plano atualizado. O valor sera usado quando o contrato for criado.' };
     });
   }
 }

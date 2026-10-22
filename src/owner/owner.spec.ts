@@ -27,13 +27,26 @@ describe('Platform owner authorization', () => {
   });
   const make = async () => {
     const actor={id:ownerId,role:'ADMIN',tokenVersion:1,passwordHash:await bcrypt.hash('password',4)};
-    const tenant={planId:'old',subscription:{status:'ACTIVE'},_count:{users:3,channels:2}};
-    const tx:any={$queryRaw:jest.fn(),user:{findUnique:jest.fn().mockResolvedValue(actor)},tenant:{findUnique:jest.fn().mockResolvedValue(tenant),update:jest.fn()},plan:{findUnique:jest.fn().mockResolvedValue({id:'new',maxUsers:5,maxChannels:3})},auditEvent:{create:jest.fn()}};
+    const tenant={planId:'old',subscription:{id:'sub',status:'ACTIVE',calendarEnabled:true,billingOptions:{}},_count:{users:3,channels:2}};
+    const tx:any={$queryRaw:jest.fn(),user:{findUnique:jest.fn().mockResolvedValue(actor)},tenant:{findUnique:jest.fn().mockResolvedValue(tenant),update:jest.fn()},subscription:{update:jest.fn()},plan:{findUnique:jest.fn().mockResolvedValue({id:'new',maxUsers:5,maxChannels:3,priceCents:29900})},auditEvent:{create:jest.fn()}};
     const prisma:any={user:tx.user,$transaction:jest.fn(fn=>fn(tx))};
-    return {service:new OwnerService(prisma),tx,tenant,dto:{planId:'new',expectedPlanId:'old',currentPassword:'password',confirmation:'ACCESS_ONLY'}};
+    return {service:new OwnerService(prisma),tx,tenant,dto:{planId:'new',expectedPlanId:'old',currentPassword:'password',confirmation:'PLAN_AND_NEXT_MONTH'}};
   };
   it('rejects downgrade exceeding actual usage and leaves plan untouched',async()=>{const {service,tx,dto}=await make();tx.plan.findUnique.mockResolvedValue({id:'new',maxUsers:2,maxChannels:1});await expect(service.changePlan('tenant',ownerId,dto)).rejects.toThrow('Uso atual');expect(tx.tenant.update).not.toHaveBeenCalled();});
   it('rejects stale plan and canceled contracts',async()=>{const {service,tenant,dto}=await make();tenant.planId='changed';await expect(service.changePlan('tenant',ownerId,dto)).rejects.toThrow('outra operacao');tenant.planId='old';tenant.subscription.status='CANCELED';await expect(service.changePlan('tenant',ownerId,dto)).rejects.toThrow('encerrado');});
-  it('changes only access limits and records actor, old and new plans',async()=>{const {service,tx,dto}=await make();expect(await service.changePlan('tenant',ownerId,dto)).toMatchObject({billingChanged:false});expect(tx.tenant.update).toHaveBeenCalledWith({where:{id:'tenant'},data:{planId:'new'}});expect(tx.auditEvent.create).toHaveBeenCalledWith({data:{tenantId:'tenant',actorId:ownerId,action:'owner.plan_access_changed:old:new'}});});
+  it('changes limits and schedules the next monthly price',async()=>{const {service,tx,dto}=await make();expect(await service.changePlan('tenant',ownerId,dto)).toMatchObject({billingChanged:true});expect(tx.tenant.update).toHaveBeenCalledWith({where:{id:'tenant'},data:{planId:'new'}});expect(tx.subscription.update).toHaveBeenCalledWith(expect.objectContaining({data:{billingOptions:{planPriceSchedule:[expect.objectContaining({priceCents:29900,planId:'new'})]}}}));});
   it('wrong password does not start transaction',async()=>{const {service,tx,dto}=await make();await expect(service.changePlan('tenant',ownerId,{...dto,currentPassword:'wrong'})).rejects.toThrow('Senha');expect(tx.$queryRaw).not.toHaveBeenCalled();});
+  it('replaces a pending price in the same effective month while preserving billing options',async()=>{
+    const {service,tx,tenant,dto}=await make();
+    const first=await service.changePlan('tenant',ownerId,dto);
+    (tenant.subscription as any).billingOptions={billingType:'BOLETO',fine:{value:2},planPriceSchedule:[{month:first.effectiveMonth,priceCents:10000}]};
+    await service.changePlan('tenant',ownerId,dto);
+    const options=tx.subscription.update.mock.calls[1][0].data.billingOptions;
+    expect(options.billingType).toBe('BOLETO');expect(options.fine).toEqual({value:2});expect(options.planPriceSchedule).toHaveLength(1);expect(options.planPriceSchedule[0].priceCents).toBe(29900);
+  });
+  it('does not change a legacy contract before calendar migration',async()=>{
+    const {service,tx,tenant,dto}=await make();tenant.subscription.calendarEnabled=false;
+    await expect(service.changePlan('tenant',ownerId,dto)).rejects.toThrow('migracao');expect(tx.tenant.update).not.toHaveBeenCalled();
+  });
+
 });

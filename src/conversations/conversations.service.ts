@@ -6,7 +6,7 @@ import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { defaults, withinHours, WorkspaceDto, AvailabilityDto } from '../workspace/workspace.dto';
 import { StartConversationDto, TemplateMessageDto } from './dto/start-conversation.dto';
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ContactsService } from './contacts.service';
 import { EvolutionConnector } from '../channels/connectors/evolution.connector';
@@ -303,9 +303,14 @@ export class ConversationsService {
   }
 
   async updateStatus(tenantId: string, conversationId: string, status: 'OPEN' | 'PENDING' | 'RESOLVED', actorId?: string) {
-    await this.findOwnedConversation(tenantId, conversationId);
+    const owned = await this.findOwnedConversation(tenantId, conversationId);
     const actor = actorId ? await this.prisma.user.findFirst({ where: { id: actorId, tenantId } }) : null;
     return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM channels WHERE id = ${owned.channelId} FOR UPDATE`;
+      if (status !== 'RESOLVED') {
+        const active = await tx.conversation.findFirst({ where: { channelId: owned.channelId, contactId: owned.contactId, id: { not: conversationId }, status: { in: ['OPEN','PENDING'] } } });
+        if (active) throw new ConflictException('Este contato ja tem um atendimento ativo neste canal. Abra a conversa em andamento.');
+      }
       const updated = await tx.conversation.update({ where: { id: conversationId }, data: {
         status, pipelineStage:status==='RESOLVED'?'RESOLVED':status==='PENDING'?'WAITING':'QUEUE',replyDueAt:null, ...(status === 'RESOLVED' ? { resolvedById: actor?.id || null, resolvedByName: actor?.name || null, resolvedAt: new Date() } : {}),
       } });
