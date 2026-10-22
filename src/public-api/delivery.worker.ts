@@ -1,3 +1,4 @@
+import { isPhoneSuppressed } from '../conversations/contact-identity';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ApiDelivery } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -81,7 +82,7 @@ export class DeliveryWorker implements OnModuleInit,OnModuleDestroy {
    else if(conversation.status==='RESOLVED')reason='CONVERSATION_RESOLVED';
    else if(conversation.channel.status!=='CONNECTED')reason='CHANNEL_DISCONNECTED';
    else if(!await this.prisma.apiKey.findFirst({where:{tenantId:job.tenantId,keyHash:job.apiKeyHash,revokedAt:null},select:{id:true}}))reason='API_KEY_REVOKED';
-   else if(await this.prisma.campaignSuppression.findUnique({where:{tenantId_phoneHash:{tenantId:job.tenantId,phoneHash:hash(`${job.tenantId}:${conversation.contact.waId}`)}}}))reason='RECIPIENT_OPTED_OUT';
+   else if(await isPhoneSuppressed(this.prisma,job.tenantId,conversation.contact.waId))reason='RECIPIENT_OPTED_OUT';
    if(reason){await this.prisma.apiDelivery.updateMany({where:{id:job.id,state:'PROCESSING'},data:{state:'CANCELLED',errorCode:reason,...cleared}});return;}
    const payload:DeliveryPayload=JSON.parse(unseal(job.payload!,contextFor(job.tenantId,job.id)));
    const file=deserializeFile(payload.file);

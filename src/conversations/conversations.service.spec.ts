@@ -13,7 +13,7 @@ describe('ConversationsService', () => {
     prisma = {
       campaignDelivery:{updateMany:jest.fn()}, campaignSuppression:{upsert:jest.fn()},
       tenant: { findUniqueOrThrow: jest.fn().mockResolvedValue({ status: "ACTIVE", workspaceSettings: {} }) },
-      contact: { findUnique: jest.fn(), create: jest.fn() },
+      contact: { findFirst: jest.fn().mockResolvedValue(null), findUnique: jest.fn().mockResolvedValue({waId:'5531999999999'}), create: jest.fn() },
       conversation: {
         findFirst: jest.fn(),
         create: jest.fn(),
@@ -26,7 +26,7 @@ describe('ConversationsService', () => {
     };
     prisma.$transaction = jest.fn((fn: any) => fn(prisma));
     prisma.$queryRaw = jest.fn();
-    prisma.contact = { upsert: jest.fn().mockResolvedValue({ id: 'contact-1', waId: '5511999999999' }) };
+    prisma.contact = { findFirst: jest.fn().mockResolvedValue(null), findUnique: jest.fn().mockResolvedValue({waId:'5531999999999'}), upsert: jest.fn().mockResolvedValue({ id: 'contact-1', waId: '5511999999999' }) };
     contacts = { findOrCreate: jest.fn() };
     evolutionConnector = { sendText: jest.fn() };
     metaConnector = { sendText: jest.fn() };
@@ -124,6 +124,24 @@ describe('ConversationsService', () => {
         data: { status: 'OPEN', updatedAt: expect.any(Date), pipelineStage:'QUEUE', replyDueAt:null },
       });
     });
+  });
+
+  it('abertura manual/API reutiliza contato e conversa para o nono digito',async()=>{
+    prisma.channel={findFirst:jest.fn().mockResolvedValue({id:'channel',tenantId:'tenant'})};
+    prisma.contact.findFirst.mockResolvedValue({id:'contact-old',waId:'553198051379'});
+    prisma.conversation.findFirst.mockResolvedValue({id:'active'});
+    expect(await service.start('tenant',{channelId:'channel',phone:'5531998051379'})).toEqual({id:'active'});
+    expect(prisma.contact.upsert).not.toHaveBeenCalled();expect(prisma.conversation.create).not.toHaveBeenCalled();
+    expect(prisma.conversation.findFirst).toHaveBeenCalledWith(expect.objectContaining({where:expect.objectContaining({channelId:'channel',contactId:'contact-old'})}));
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+  it('entrada com nono digito preserva a conversa ativa do contato antigo',async()=>{
+    prisma.contact.findFirst.mockResolvedValue({id:'contact-old',name:'Maria',waId:'553198051379'});
+    prisma.conversation.findFirst.mockResolvedValue({id:'active',status:'OPEN'});
+    prisma.conversation.update.mockResolvedValue({id:'active',status:'OPEN'});
+    await service.recordInboundMessage({id:'channel',tenantId:'tenant',externalId:'instance',type:'QR_EVOLUTION',autoReplyEnabled:false,autoReplyMessage:null},'5531998051379','Oi',undefined,{});
+    expect(prisma.message.create.mock.calls[0][0].data.conversationId).toBe('active');
+    expect(prisma.contact.upsert).not.toHaveBeenCalled();expect(prisma.conversation.create).not.toHaveBeenCalled();
   });
 
   describe('assign', () => {

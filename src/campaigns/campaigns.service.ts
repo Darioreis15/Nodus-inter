@@ -1,3 +1,4 @@
+import { phoneAliases, isPhoneSuppressed, resolveContact } from '../conversations/contact-identity';
 import { Prisma } from '@prisma/client';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { createHash } from 'crypto';
@@ -47,10 +48,10 @@ export class CampaignsService implements OnModuleInit, OnModuleDestroy {
     const page = rows.slice(0,50);
     const eligible = page.filter(c => /^[1-9]\d{7,14}$/.test(c.waId));
     const suppressed = eligible.length ? await this.prisma.campaignSuppression.findMany({
-      where:{tenantId,phoneHash:{in:eligible.map(c=>phoneHash(tenantId,c.waId))}},select:{phoneHash:true},
+      where:{tenantId,phoneHash:{in:eligible.flatMap(c=>phoneAliases(c.waId).map(p=>phoneHash(tenantId,p)))}},select:{phoneHash:true},
     }) : [];
     const blocked = new Set(suppressed.map(s=>s.phoneHash));
-    return {contacts:eligible.filter(c=>!blocked.has(phoneHash(tenantId,c.waId))).map(c=>({id:c.id,name:c.name,phone:c.waId})),nextCursor:rows.length>50 ? page[49].id : null};
+    return {contacts:eligible.filter(c=>!phoneAliases(c.waId).some(p=>blocked.has(phoneHash(tenantId,p)))).map(c=>({id:c.id,name:c.name,phone:c.waId})),nextCursor:rows.length>50 ? page[49].id : null};
   }
   async create(tenantId: string, dto: CampaignDto, sourceKeyHash?: string) {
     if (!dto.consentConfirmed) throw new BadRequestException('Confirme a autorizacao dos destinatarios.');
@@ -76,10 +77,13 @@ export class CampaignsService implements OnModuleInit, OnModuleDestroy {
       const pending = await tx.campaignDelivery.count({ where:{ campaign:{ tenantId }, status:{ in:['QUEUED','SENDING'] } } });
       if (pending + dto.recipients.length*dto.steps.length > 5000) throw new ForbiddenException('Limite de 5000 envios pendentes por empresa.');
       const campaign = await tx.campaign.create({ data:{ tenantId, channelId:dto.channelId, name:dto.name, requestKey:dto.requestKey, requestHash, stopOnReply:dto.stopOnReply, sourceKeyHash } });
+      const seenContacts = new Set<string>();
       for (let i=0;i<dto.recipients.length;i++) {
         const r = dto.recipients[i];
-        const blocked = await tx.campaignSuppression.findUnique({ where:{ tenantId_phoneHash:{ tenantId, phoneHash:phoneHash(tenantId,r.phone) } } });
-        const contact = await tx.contact.upsert({ where:{ tenantId_waId:{ tenantId, waId:r.phone } }, create:{ tenantId, waId:r.phone, name:r.name || null }, update:{} });
+        const blocked = await isPhoneSuppressed(tx,tenantId,r.phone);
+        const contact = await resolveContact(tx, tenantId, channel.id, r.phone, r.name);
+        if (seenContacts.has(contact.id)) throw new BadRequestException('Destinatario repetido com variacao do nono digito. Revise a lista.');
+        seenContacts.add(contact.id);
         await tx.campaignDelivery.createMany({ data:payloads[i].map((payload,step) => ({ campaignId:campaign.id, contactId:contact.id, step, dueAt:new Date(scheduledAt.getTime()+payload.delayMinutes*60000), payload:blocked ? {} : JSON.parse(JSON.stringify(payload)), finishedAt:blocked ? new Date() : null, status:blocked ? 'SKIPPED' : 'QUEUED', error:blocked ? 'Destinatario optou por sair.' : null })) });
       }
       await tx.auditEvent.create({data:{tenantId,action:`campaign.created:consent_confirmed:${campaign.id}`}});
@@ -134,7 +138,7 @@ export class CampaignsService implements OnModuleInit, OnModuleDestroy {
       if (!job) return null;
       let reason: string | null = null;
       if (job.campaign.sourceKeyHash && !await tx.apiKey.findFirst({where:{tenantId,keyHash:job.campaign.sourceKeyHash,revokedAt:null}})) reason = 'Chave de API revogada.';
-      if (await tx.campaignSuppression.findUnique({where:{tenantId_phoneHash:{tenantId,phoneHash:phoneHash(tenantId,job.contact.waId)}}})) reason = 'Destinatario optou por sair.';
+      if (await isPhoneSuppressed(tx,tenantId,job.contact.waId)) reason = 'Destinatario optou por sair.';
       if (job.campaign.stopOnReply && await tx.message.findFirst({where:{direction:'INBOUND',createdAt:{gt:job.campaign.createdAt},conversation:{contactId:job.contactId,channelId:job.campaign.channelId}}})) reason = 'Cliente respondeu; sequencia interrompida.';
       if (job.step > 0) {
         const previous = await tx.campaignDelivery.findUnique({where:{campaignId_contactId_step:{campaignId:job.campaignId,contactId:job.contactId,step:job.step-1}}});
@@ -159,7 +163,7 @@ export class CampaignsService implements OnModuleInit, OnModuleDestroy {
     try {
       const conversation = await this.conversations.start(tenantId,{channelId:job.campaign.channelId,phone:job.contact.waId});
       // Opt-out may arrive between claiming the job and preparing the conversation.
-      if (await this.prisma.campaignSuppression.findUnique({where:{tenantId_phoneHash:{tenantId,phoneHash:phoneHash(tenantId,job.contact.waId)}}})) {
+      if (await isPhoneSuppressed(this.prisma,tenantId,job.contact.waId)) {
         await this.prisma.campaignDelivery.updateMany({where:{id:job.id,status:'SENDING'},data:{status:'SKIPPED',payload:{},error:'Destinatario optou por sair.',finishedAt:new Date()}});
         return;
       }

@@ -1,3 +1,4 @@
+import { phoneAliases, resolveContact } from './contact-identity';
 import { validateOutboundFile } from './outbound-file';
 import type { AttachmentFile } from './attachment-upload';
 import { inboundPipeline, trackOutbound } from './pipeline';
@@ -43,7 +44,7 @@ export class ConversationsService {
       await tx.$queryRaw`SELECT id FROM channels WHERE id = ${channel.id} FOR UPDATE`;
       const existing = await tx.message.findFirst({where:{externalId, conversation:{channelId:channel.id}}});
       if (existing) return existing;
-      const contact = await tx.contact.upsert({where:{tenantId_waId:{tenantId:channel.tenantId,waId:toNumber}},create:{tenantId:channel.tenantId,waId:toNumber},update:{}});
+      const contact = await resolveContact(tx, channel.tenantId, channel.id, toNumber);
       let conversation = await tx.conversation.findFirst({where:{channelId:channel.id,contactId:contact.id,status:{in:['OPEN','PENDING']}},orderBy:{updatedAt:'desc'}});
       if (!conversation) conversation = await tx.conversation.create({data:{channelId:channel.id,contactId:contact.id,status:'OPEN'}});
       return tx.message.create({data:{conversationId:conversation.id,direction:'OUTBOUND',externalId,fromNumber:channel.externalId || '',toNumber,body:text,status:'SENT',media:media as unknown as Prisma.InputJsonValue}});
@@ -82,10 +83,7 @@ export class ConversationsService {
         const duplicate = await tx.message.findFirst({ where: { externalId, conversation: { channelId: channel.id } } });
         if (duplicate) return { duplicate: true as const, conversation: await tx.conversation.findUniqueOrThrow({ where: { id: duplicate.conversationId } }) };
       }
-      const contact = await tx.contact.upsert({
-        where: { tenantId_waId: { tenantId: channel.tenantId, waId: fromNumber } },
-        create: { tenantId: channel.tenantId, waId: fromNumber, name: contactName?.slice(0, 120) || null }, update: {},
-      });
+      const contact = await resolveContact(tx, channel.tenantId, channel.id, fromNumber, contactName);
       if (!contact.name && contactName) await tx.contact.updateMany({ where: { id: contact.id, name: null }, data: { name: contactName } });
       let conversation = await tx.conversation.findFirst({
         where: { channelId: channel.id, contactId: contact.id, status: { in: ['OPEN', 'PENDING'] } },
@@ -106,8 +104,10 @@ export class ConversationsService {
       const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: channel.tenantId } });
       const optOut = ['sair','parar','stop','cancelar'].includes(text.trim().toLowerCase());
       if (optOut) {
-        const phoneHash = createHash('sha256').update(`${channel.tenantId}:${fromNumber}`).digest('hex');
-        await tx.campaignSuppression.upsert({where:{tenantId_phoneHash:{tenantId:channel.tenantId,phoneHash}},create:{tenantId:channel.tenantId,phoneHash},update:{}});
+        for (const phone of phoneAliases(fromNumber)) {
+          const phoneHash = createHash('sha256').update(`${channel.tenantId}:${phone}`).digest('hex');
+          await tx.campaignSuppression.upsert({where:{tenantId_phoneHash:{tenantId:channel.tenantId,phoneHash}},create:{tenantId:channel.tenantId,phoneHash},update:{}});
+        }
       }
       await tx.campaignDelivery.updateMany({where:{contactId:contact.id,status:'QUEUED',campaign:{tenantId:channel.tenantId,...(optOut ? {} : {channelId:channel.id,stopOnReply:true})}},data:{status:'SKIPPED',payload:{},error:optOut ? 'Destinatario optou por sair.' : 'Cliente respondeu.',finishedAt:new Date()}});
       const settings = { ...defaults, ...tenant.workspaceSettings as object } as WorkspaceDto;
@@ -308,7 +308,9 @@ export class ConversationsService {
     return this.prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM channels WHERE id = ${owned.channelId} FOR UPDATE`;
       if (status !== 'RESOLVED') {
-        const active = await tx.conversation.findFirst({ where: { channelId: owned.channelId, contactId: owned.contactId, id: { not: conversationId }, status: { in: ['OPEN','PENDING'] } } });
+        const contact = await tx.contact.findUnique({where:{id:owned.contactId},select:{waId:true}});
+        if (!contact) throw new NotFoundException('Contato nao encontrado.');
+        const active = await tx.conversation.findFirst({ where: { channelId: owned.channelId, OR: [{ contactId: owned.contactId }, { contact: { tenantId, waId: { in: phoneAliases(contact.waId) } } }], id: { not: conversationId }, status: { in: ['OPEN','PENDING'] } } });
         if (active) throw new ConflictException('Este contato ja tem um atendimento ativo neste canal. Abra a conversa em andamento.');
       }
       const updated = await tx.conversation.update({ where: { id: conversationId }, data: {
@@ -333,11 +335,11 @@ export class ConversationsService {
 
   async start(tenantId: string, dto: StartConversationDto) {
     return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
       const channel = await tx.channel.findFirst({ where: { id: dto.channelId, tenantId } });
       if (!channel) throw new NotFoundException('Canal nao encontrado.');
       await tx.$queryRaw`SELECT id FROM channels WHERE id = ${channel.id} FOR UPDATE`;
-      const contact = await tx.contact.upsert({ where: { tenantId_waId: { tenantId, waId: dto.phone } },
-        create: { tenantId, waId: dto.phone, name: dto.name || null }, update: {} });
+      const contact = await resolveContact(tx, tenantId, channel.id, dto.phone, dto.name);
       const existing = await tx.conversation.findFirst({ where: { channelId: channel.id, contactId: contact.id, status: { in: ['OPEN', 'PENDING'] } } });
       return existing || tx.conversation.create({ data: { channelId: channel.id, contactId: contact.id } });
     });
