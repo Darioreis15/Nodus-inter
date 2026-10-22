@@ -59,4 +59,27 @@ describe('Sandbox WhatsApp authorization', () => {
   expect(prisma.billingDelivery.updateMany).not.toHaveBeenCalled();
  });
 
+ it('requires explicit owner reconciliation for a previous attempt and preserves its timestamp',async()=>{
+  const attemptedAt=new Date('2026-10-21T20:34:09Z');
+  Object.assign(row,{error:'SANDBOX_TARGET_CHANGED',attemptedAt,testTarget:{phone:'31999999999',channelId:'channel'}});
+  await expect(service.whatsapp('tenant',actorId,dto)).rejects.toThrow('outro destino');
+  expect(prisma.billingDelivery.updateMany).not.toHaveBeenCalled();
+  await service.whatsapp('tenant',actorId,{...dto,confirmedNotSent:true});
+  expect(row.state).toBe('SENT');expect(row.attemptedAt).toEqual(attemptedAt);
+  expect(row.testTarget.phone).toBe(dto.expectedPhone);
+  expect(prisma.auditEvent.create).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({action:'billing.sandbox.whatsapp_confirmed_not_sent:cycle'})}));
+  await service.whatsapp('tenant',actorId,{...dto,confirmedNotSent:true});
+  expect(prisma.billingDelivery.updateMany).toHaveBeenCalledTimes(1);
+ });
+ it.each(['SENT','SENDING','REVIEW'])('never requeues %s even with confirmation',async state=>{
+  Object.assign(row,{state,attemptedAt:new Date(),testTarget:{phone:dto.expectedPhone,channelId:dto.expectedChannelId}});
+  await service.whatsapp('tenant',actorId,{...dto,confirmedNotSent:true});
+  expect(row.state).toBe(state);expect(prisma.billingDelivery.updateMany).not.toHaveBeenCalled();
+ });
+ it('never requeues a provider-identified send with confirmation',async()=>{
+  Object.assign(row,{error:'SANDBOX_TARGET_CHANGED',providerId:'accepted',testTarget:{phone:dto.expectedPhone,channelId:dto.expectedChannelId}});
+  await service.whatsapp('tenant',actorId,{...dto,confirmedNotSent:true});
+  expect(row.state).toBe('SKIPPED');expect(prisma.billingDelivery.updateMany).not.toHaveBeenCalled();
+ });
+
 });

@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { IsEmail, IsIn, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertPlatformOwner } from '../owner/owner-access';
@@ -21,6 +21,7 @@ export class SandboxWhatsappDto {
   @IsUUID() cycleId: string;
   @Matches(/^[1-9]\d{7,14}$/) expectedPhone: string;
   @IsUUID() expectedChannelId: string;
+  @IsOptional() @IsIn([true]) confirmedNotSent?: boolean;
 }
 
 @Injectable()
@@ -128,14 +129,14 @@ export class BillingSandbox {
       const row = await tx.billingDelivery.findUnique({ where: { cycleId_kind: { cycleId: cycle.id, kind: 'WHATSAPP' } } });
       if (!row) throw new ConflictException('Registro de envio nao encontrado. Atualize o teste por e-mail.');
       const target = { phone: dto.expectedPhone, channelId: dto.expectedChannelId };
-      // Only recover a preflight rejection: no provider attempt may have occurred.
-      if (row.state === 'SKIPPED' && row.error === 'SANDBOX_TARGET_CHANGED' && row.attemptedAt === null && row.providerId === null) {
+      // Attempts require explicit owner reconciliation; accepted sends are never reset.
+      if (row.state === 'SKIPPED' && row.error === 'SANDBOX_TARGET_CHANGED' && row.providerId === null && (row.attemptedAt === null || dto.confirmedNotSent === true)) {
         const recovered = await tx.billingDelivery.updateMany({
-          where: { id: row.id, state: 'SKIPPED', error: 'SANDBOX_TARGET_CHANGED', attemptedAt: null, providerId: null },
+          where: { id: row.id, state: 'SKIPPED', error: 'SANDBOX_TARGET_CHANGED', attemptedAt: row.attemptedAt, providerId: null },
           data: { testTarget: target, state: 'QUEUED', error: null, nextAttemptAt: new Date() },
         });
         if (!recovered.count) throw new ConflictException('O teste mudou. Atualize a tela antes de confirmar novamente.');
-        await tx.auditEvent.create({ data: { tenantId, actorId, action: `billing.sandbox.whatsapp_reauthorized:${cycle.id}` } });
+        await tx.auditEvent.create({ data: { tenantId, actorId, action: `billing.sandbox.${row.attemptedAt ? 'whatsapp_confirmed_not_sent' : 'whatsapp_reauthorized'}:${cycle.id}` } });
         return row.id;
       }
       if (row.testTarget) {

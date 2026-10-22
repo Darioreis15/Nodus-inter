@@ -133,6 +133,7 @@ async function openDelivery(company){
     const prefs=data.settings||{};
     sandboxTest={...data.sandboxTest,email:prefs.email,phone:prefs.phone,channelId:prefs.channelId};
     const testChannel=data.channels.find(channel=>channel.id===prefs.channelId);
+    sandboxTest.requiresReconciliation=(data.history||[]).some(row=>row.kind==='WHATSAPP'&&row.cycle?.id===sandboxTest.cycleId&&row.state==='SKIPPED'&&row.error==='SANDBOX_TARGET_CHANGED'&&!!row.attemptedAt);
     $('sandboxWhatsapp').disabled=!(sandboxTest.available&&sandboxTest.cycleId&&data.workerEnabled&&data.enabled&&prefs.whatsappEnabled&&prefs.phone&&testChannel?.type==='QR_EVOLUTION'&&testChannel?.status==='CONNECTED');
     $('sandboxWhatsappInfo').textContent=sandboxTest.cycleId?`WhatsApp: reutiliza a última cobrança de teste, sem gerar outra nem reenviar e-mail. Destino salvo: ${prefs.phone||'não configurado'} · canal: ${testChannel?.name||'não configurado'}. Use um número sob seu controle e um canal Evolution conectado.`:'Gere primeiro o teste por e-mail para habilitar o envio da mesma cobrança por WhatsApp.';
     $('sandboxBillingSection').hidden=!sandboxTest.available;
@@ -195,10 +196,15 @@ $('sandboxWhatsapp').onclick=async()=>{
   const password=$('deliveryPassword').value;
   if(!password){$('sandboxBillingResult').textContent='Preencha sua senha de proprietário no campo acima.';$('deliveryPassword').focus();return;}
   const company=deliverySelection,snapshot={...sandboxTest};
+  let confirmedNotSent=false;
+  if(snapshot.requiresReconciliation){
+    if(!confirm(`Este teste tem uma tentativa anterior. Você conferiu no WhatsApp remetente/provedor que a cobrança NÃO foi enviada? Confirmar autoriza nova tentativa para ${snapshot.phone}. Se houver dúvida, cancele para evitar duplicidade.`))return;
+    confirmedNotSent=true;
+  }
   if(!confirm(`Enviar a cobrança Sandbox existente para ${snapshot.phone} pelo canal salvo? Confirme que esse número está sob seu controle. Não será gerada outra cobrança nem reenviado o e-mail. Um envio já aceito não será repetido.`))return;
   deliveryBusy=true;$('sandboxWhatsapp').disabled=true;$('sandboxBilling').disabled=true;$('saveDelivery').disabled=true;
   try{
-    const result=await api(`/owner/tenants/${encodeURIComponent(company.id)}/sandbox-whatsapp`,{method:'POST',body:JSON.stringify({currentPassword:password,confirmation:'SANDBOX_WHATSAPP',cycleId:snapshot.cycleId,expectedPhone:snapshot.phone,expectedChannelId:snapshot.channelId})});
+    const result=await api(`/owner/tenants/${encodeURIComponent(company.id)}/sandbox-whatsapp`,{method:'POST',body:JSON.stringify({currentPassword:password,confirmation:'SANDBOX_WHATSAPP',cycleId:snapshot.cycleId,expectedPhone:snapshot.phone,expectedChannelId:snapshot.channelId,...(confirmedNotSent?{confirmedNotSent:true}:{})})});
     deliveryBusy=false;await openDelivery(company);
     if(!token||deliverySelection?.id!==company.id)return;
     $('sandboxBillingResult').textContent=`Teste WhatsApp: ${deliveryLabels[result.whatsappState]||result.whatsappState}. Confira o celular de destino. ${result.error?(deliveryErrors[result.error]||'Confira o histórico antes de repetir.') : ''}`;
