@@ -1,3 +1,5 @@
+import { Transform } from 'class-transformer';
+import { normalizePhone } from '../conversations/dto/normalize-phone';
 import { sandboxBillingAvailable } from './sandbox-config';
 import { saoPauloDate } from './billing-calendar';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
@@ -12,7 +14,8 @@ export class BillingDeliveryDto {
  @IsBoolean() emailEnabled:boolean;
  @IsBoolean() whatsappEnabled:boolean;
  @IsOptional() @IsEmail() @MaxLength(254) email?:string;
- @IsOptional() @Matches(/^[1-9]\d{7,14}$/) phone?:string;
+ @IsOptional() @Transform(({value})=>normalizePhone(value))
+ @Matches(/^[1-9]\d{7,14}$/, {message:'Informe DDD e telefone brasileiro ou +DDI e numero para outros paises.'}) phone?:string;
  @IsOptional() @IsUUID() channelId?:string;
  @IsIn(['BOLETO','UNDEFINED','PIX']) billingType:string;
  @IsIn([true]) takeoverConfirmed:boolean;
