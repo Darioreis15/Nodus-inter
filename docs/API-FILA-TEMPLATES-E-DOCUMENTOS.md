@@ -16,7 +16,7 @@ Authorization: Bearer SUA_CHAVE_API_NODUS
 
 Repetir a mesma chave e conteúdo na fila retorna o mesmo protocolo. Mudar conversa, texto, parâmetros, legenda, nome/MIME ou bytes do arquivo retorna 409. A mesma chave pode ser usada por empresas diferentes sem colisão. O escopo da fila é separado do escopo das rotas imediatas: **não alterne de rota para repetir um envio incerto**, pois isso pode duplicá-lo.
 
-URL base: `https://nodus-inter.onrender.com/public/v1`.
+URL base: `https://nodus-inter.onrender.com/public/v2`.
 
 ## Preparar o destinatário
 
@@ -215,3 +215,7 @@ Importe `Nodus-Fila.postman_collection.json` e `Nodus-Fila.postman_environment.j
 - Acompanhar limites com pequenos lotes antes de enviar faturamento real.
 
 Os testes automatizados utilizam provedores simulados e banco PostgreSQL embarcado. A entrega real pela Meta e a capacidade do ambiente precisam ser validadas com a conta da empresa.
+
+## Versão da API
+
+Novas integrações utilizam `/public/v2`. A conexão por QR Code retorna `type: "QR_NODUS"`; a oficial mantém `OFFICIAL_META`. As mesmas chaves, limites e regras de idempotência valem nas duas versões. `/public/v1` continua compatível com clientes existentes. Não repita um envio usando outra versão ou outra chave de idempotência: mudar a URL não cria uma operação independente. A v2 omite o campo técnico `raw` das mensagens. Conteúdo de mensagens, nomes de contatos e identificadores de envio são preservados.

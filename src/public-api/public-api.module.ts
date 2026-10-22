@@ -1,3 +1,4 @@
+import { NodusResponseInterceptor } from './nodus-response';
 import { DeliveryController, DeliveryRunController } from './delivery.controller';
 import { DeliveryService } from './delivery.service';
 import { DeliveryWorker } from './delivery.worker';
@@ -13,6 +14,6 @@ import { ApiKeyGuard } from './guards/api-key.guard';
 @Module({
   imports: [ApiKeysModule, ConversationsModule],
   controllers: [DeliveryController, DeliveryRunController, PublicAttachmentsController, PublicConversationsController, PublicChannelsController],
-  providers: [DeliveryService, DeliveryWorker, DeliveryInput, PublicTemplatesService, PublicAttachmentsService, ApiKeyGuard],
+  providers: [NodusResponseInterceptor, DeliveryService, DeliveryWorker, DeliveryInput, PublicTemplatesService, PublicAttachmentsService, ApiKeyGuard],
 })
 export class PublicApiModule {}

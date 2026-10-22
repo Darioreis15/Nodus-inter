@@ -1,3 +1,4 @@
+import { NodusResponseInterceptor } from './nodus-response';
 import { Body, Controller, Delete, Get, Headers, HttpCode, Param, Post, Query, Req, UploadedFile, UseGuards, UseInterceptors, UnauthorizedException } from '@nestjs/common';
 import { AttachmentFile } from '../conversations/attachment-upload';
 import { secretMatches } from '../security/secrets';
@@ -6,7 +7,8 @@ import { CurrentApiTenant } from './decorators/current-api-tenant.decorator';
 import { DeliveryDto, DeliveryInput } from './delivery-input';
 import { DeliveryService } from './delivery.service';
 import { DeliveryWorker } from './delivery.worker';
-@Controller('public/v1')
+@UseInterceptors(NodusResponseInterceptor)
+@Controller(['public/v1', 'public/v2'])
 @UseGuards(ApiKeyGuard)
 export class DeliveryController {
  constructor(private service:DeliveryService){}
