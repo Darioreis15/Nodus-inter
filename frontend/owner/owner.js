@@ -139,7 +139,7 @@ async function openDelivery(company){
     $('sandboxBilling').disabled=!(data.workerEnabled&&data.emailReady&&data.enabled&&prefs.emailEnabled&&prefs.email);
     $('sandboxBillingInfo').textContent=`Teste de ${money(sandboxTest.valueCents||500)} · e-mail salvo: ${prefs.email||'não configurado'} · um teste por empresa/dia. Salve a configuração antes de testar.`;
     $('sandboxBillingResult').textContent='';$('deliveryEmailEnabled').checked=!!prefs.emailEnabled;$('deliveryWhatsappEnabled').checked=!!prefs.whatsappEnabled;
-    $('deliveryEmail').value=prefs.email||'';$('deliveryPhone').value=prefs.phone||'';$('deliveryBillingType').value=data.billingType;
+    $('deliveryEmail').value=prefs.email||'';$('deliveryPhone').value=prefs.phone?(prefs.phone.startsWith('55')?prefs.phone:'+'+prefs.phone):'';$('deliveryBillingType').value=data.billingType;
     $('deliveryChannel').replaceChildren(new Option('Selecione o canal remetente',''));
     for(const channel of data.channels){const option=new Option(`${channel.name} · ${channel.type==='OFFICIAL_META'?'Meta':'Evolution'} · ${channel.status}`,channel.id);option.selected=channel.id===prefs.channelId;$('deliveryChannel').append(option);}
     $('deliveryHistory').replaceChildren();
@@ -156,8 +156,8 @@ $('deliveryDialog').addEventListener('cancel',event=>{if(deliveryBusy)event.prev
 $('deliveryForm').onsubmit=async event=>{
   event.preventDefault();if(!deliverySelection||deliveryBusy)return;deliveryBusy=true;$('saveDelivery').disabled=true;
   try{
-    const phone=$('deliveryPhone').value.replace(/[\s()+-]/g,'');
-    if($('deliveryWhatsappEnabled').checked && !/^[1-9]\d{7,14}$/.test(phone))throw new Error('Informe o celular com código do país, somente números.');
+    const phone=$('deliveryPhone').value.trim();
+    if($('deliveryWhatsappEnabled').checked && (!phone || !/^\+?[\d\s().-]+$/.test(phone)))throw new Error('Informe DDD e telefone. Para outros países, use + e o código do país.');
     const email=$('deliveryEmail').value.trim(),channelId=$('deliveryChannel').value;
     await api(`/owner/tenants/${encodeURIComponent(deliverySelection.id)}/delivery`,{method:'PATCH',body:JSON.stringify({emailEnabled:$('deliveryEmailEnabled').checked,whatsappEnabled:$('deliveryWhatsappEnabled').checked,...(email?{email}:{}),...(phone?{phone}:{}),...(channelId?{channelId}:{}),billingType:$('deliveryBillingType').value,takeoverConfirmed:$('deliveryAck').checked,currentPassword:$('deliveryPassword').value})});
     const company=deliverySelection;deliveryBusy=false;await openDelivery(company);

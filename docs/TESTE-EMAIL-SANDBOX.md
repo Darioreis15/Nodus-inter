@@ -67,7 +67,7 @@ Após o merge e deploy, publique também os três arquivos de `frontend/owner` n
 
 1. Mantenha Asaas Sandbox e `BILLING_SANDBOX_TEST_ENABLED=true`, `BILLING_DELIVERY_ENABLED=true`.
 2. Abra Owner → empresa com contrato → Avisos de cobrança.
-3. Salve o envio por WhatsApp com um número de teste sob seu controle (código do país + DDD + número) e um canal Evolution conectado da Nodus. Use um número de destino diferente do remetente.
+3. Salve o envio por WhatsApp com um número de teste sob seu controle (DDD + número para Brasil; +DDI para outros países) e um canal Evolution conectado da Nodus. Use um número de destino diferente do remetente.
 4. Gere primeiro o teste por e-mail se ainda não existir. O teste WhatsApp reutiliza a última cobrança Sandbox criada desse contrato, inclusive de outro dia, sem emitir outra nem reenviar o e-mail.
 5. Preencha novamente sua senha de proprietário e clique em **Enviar / consultar teste no WhatsApp**. Confira o destinatário na confirmação.
 6. Verifique a mensagem no celular e o link da cobrança Sandbox de R$ 5. Não pague. `SENT` indica aceitação pelo provedor; confirme o recebimento no aparelho.
@@ -77,3 +77,5 @@ O botão só habilita com avisos ativos, destinatário salvo, canal Evolution co
 A autorização registra o número e canal. Mudanças posteriores não redirecionam esse teste. Repetições não reiniciam envios aceitos ou incertos; `REVIEW` exige conferência no provedor antes de qualquer liberação manual. A rotina mensal dia 1 / vencimento dia 10 permanece separada.
 
 Rota Owner: `POST /owner/tenants/:id/sandbox-whatsapp`, JWT do proprietário, com `currentPassword`, `confirmation: "SANDBOX_WHATSAPP"`, `cycleId`, `expectedPhone` e `expectedChannelId`. Não cria cobranças. O `cycleId` aparece em `sandboxTest` no GET de configuração dos avisos.
+
+O celular financeiro aceita pontuação: `(31) 98888-7777` é salvo como `5531988887777`. Números brasileiros já com 55 são preservados. Para outros países, informe `+DDI`; ao reabrir o formulário, esse prefixo é preservado. A confirmação do teste usa o número normalizado salvo.
