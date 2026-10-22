@@ -20,16 +20,16 @@ interface EvolutionConfig {
 export class EvolutionConnector implements ChannelConnector {
   async sendMedia(channel: Channel, message: OutboundMediaMessage): Promise<SendResult & {providerId?:string}> {
     const config = channel.config as unknown as EvolutionConfig;
-    if (!config?.instanceName) throw new BadGatewayException('Instancia Evolution nao configurada.');
+    if (!config?.instanceName) throw new BadGatewayException('Instancia Nodus nao configurada.');
     try {
       const response = await fetch(`${this.baseUrl}/message/sendMedia/${encodeURIComponent(config.instanceName)}`, {
         method:'POST',redirect:'error',signal:AbortSignal.timeout(45000),
         headers:{apikey:this.globalApiKey,'Content-Type':'application/json'},
         body:JSON.stringify({number:message.to,mediatype:message.media.kind,mimetype:message.media.mimeType,caption:message.caption,fileName:message.media.fileName,media:message.buffer.toString('base64')}),
       });
-      if (!response.ok) throw new BadGatewayException('A Evolution recusou o arquivo. Confira o canal antes de tentar novamente.');
+      if (!response.ok) throw new BadGatewayException('A Nodus recusou o arquivo. Confira o canal antes de tentar novamente.');
       const data = await response.json(); const id = data?.key?.id || data?.messageId;
-      if (typeof id !== 'string' || !id || id.length > 512) throw new BadGatewayException('Evolution sem confirmacao do envio. Confira o WhatsApp antes de repetir.');
+      if (typeof id !== 'string' || !id || id.length > 512) throw new BadGatewayException('Nodus sem confirmacao do envio. Confira o WhatsApp antes de repetir.');
       return {externalId:id};
     } catch (error) {
       if (error instanceof BadGatewayException) throw error;
@@ -73,18 +73,18 @@ export class EvolutionConnector implements ChannelConnector {
 
     if (!response.ok) {
       const detail = await response.text();
-      throw new BadGatewayException(`Falha ao criar instancia na Evolution API: HTTP ${response.status}`);
+      throw new BadGatewayException(`Falha ao criar instancia na Nodus: HTTP ${response.status}`);
     }
   }
 
   async syncWebhook(instanceName: string, webhookUrl: string) {
-    if (!process.env.EVOLUTION_WEBHOOK_TOKEN) throw new BadGatewayException('Token do webhook Evolution nao configurado.');
+    if (!process.env.EVOLUTION_WEBHOOK_TOKEN) throw new BadGatewayException('Token do webhook Nodus nao configurado.');
     const response = await fetch(`${this.baseUrl}/webhook/set/${encodeURIComponent(instanceName)}`, {
       method:'POST', redirect:'error', signal:AbortSignal.timeout(10000),
       headers:{apikey:this.globalApiKey,'Content-Type':'application/json'},
       body:JSON.stringify({webhook:{enabled:true,url:webhookUrl,headers:{'x-evolution-token':process.env.EVOLUTION_WEBHOOK_TOKEN},byEvents:false,base64:false,events:['MESSAGES_UPSERT','MESSAGES_UPDATE','CONNECTION_UPDATE']}}),
     });
-    if (!response.ok) throw new BadGatewayException('Nao foi possivel atualizar os eventos do webhook Evolution.');
+    if (!response.ok) throw new BadGatewayException('Nao foi possivel atualizar os eventos do webhook Nodus.');
     return {updated:true};
   }
 
@@ -113,7 +113,7 @@ export class EvolutionConnector implements ChannelConnector {
     // (por exemplo, se ela nunca terminou de conectar) -- nao e erro de verdade.
     if (!response.ok && response.status !== 404) {
       const detail = await response.text();
-      throw new BadGatewayException(`Falha ao deletar instancia na Evolution API: HTTP ${response.status}`);
+      throw new BadGatewayException(`Falha ao deletar instancia na Nodus: HTTP ${response.status}`);
     }
   }
 
@@ -122,7 +122,7 @@ export class EvolutionConnector implements ChannelConnector {
       method, signal: AbortSignal.timeout(10000), redirect: 'error',
       headers: { apikey: this.globalApiKey },
     });
-    if (!response.ok) throw new BadGatewayException(`Evolution recusou a operacao: HTTP ${response.status}`);
+    if (!response.ok) throw new BadGatewayException(`Nodus recusou a operacao: HTTP ${response.status}`);
     return response.json().catch(() => ({}));
   }
 
@@ -171,7 +171,7 @@ export class EvolutionConnector implements ChannelConnector {
 
     if (!response.ok) {
       const detail = await response.text();
-      throw new BadGatewayException(`Falha ao enviar mensagem via Evolution API: HTTP ${response.status}`);
+      throw new BadGatewayException(`Falha ao enviar mensagem via Nodus: HTTP ${response.status}`);
     }
 
     const data = await response.json();

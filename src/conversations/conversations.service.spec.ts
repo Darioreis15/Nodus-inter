@@ -164,4 +164,15 @@ describe('ConversationsService', () => {
       });
     });
   });
+  it('rejects reopening an old conversation when the contact already has an active one',async()=>{
+    prisma.conversation.findFirst.mockResolvedValueOnce({id:'old',channelId:'channel',contactId:'contact',status:'RESOLVED'}).mockResolvedValueOnce({id:'active'});
+    await expect(service.updateStatus('tenant','old','OPEN')).rejects.toThrow('atendimento ativo');
+    expect(prisma.$queryRaw).toHaveBeenCalled();expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+  it('reopens when no other active conversation exists',async()=>{
+    prisma.auditEvent={create:jest.fn()};
+    prisma.conversation.findFirst.mockResolvedValueOnce({id:'old',channelId:'channel',contactId:'contact',status:'RESOLVED'}).mockResolvedValueOnce(null);
+    await service.updateStatus('tenant','old','OPEN');expect(prisma.conversation.update).toHaveBeenCalled();
+  });
+
 });

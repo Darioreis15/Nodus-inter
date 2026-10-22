@@ -1,3 +1,4 @@
+import { priceForMonth, providerBillingOptions } from './plan-pricing';
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AsaasClient, CalendarPayment } from './asaas.client';
@@ -105,9 +106,10 @@ export class BillingCalendar implements OnModuleInit, OnModuleDestroy {
       await this.prisma.subscription.update({ where: { id }, data: { calendarError: `MISSED_CYCLE:${month}` } });
       return;
     }
-    if (!sub.billingPriceCents || sub.billingPriceCents < 500) throw new ConflictException('Valor nao configurado.');
+    const scheduledPrice = priceForMonth(sub.billingPriceCents, sub.billingOptions, month);
+    if (!scheduledPrice || scheduledPrice < 500) throw new ConflictException('Valor nao configurado.');
     const cycle = await this.prisma.billingCycle.upsert({ where: { subscriptionId_month: { subscriptionId: id, month } },
-      create: { subscriptionId: id, month, dueDate: `${month}-10`, valueCents: sub.billingPriceCents }, update: {} });
+      create: { subscriptionId: id, month, dueDate: `${month}-10`, valueCents: scheduledPrice }, update: {} });
     if (cycle.state === 'CREATED' || cycle.state === 'CANCELLED') return;
     const reference = billingReference(id, month);
     const existing = await this.asaas.allPayments({ customer: sub.asaasCustomerId, externalReference: reference });
@@ -132,7 +134,7 @@ export class BillingCalendar implements OnModuleInit, OnModuleDestroy {
           const remote = await this.asaas.getSubscription(current.asaasSubscriptionId);
           if (remote.status !== 'INACTIVE') throw new ConflictException('Recorrencia externa foi reativada; concilie antes de emitir.');
         }
-        const payment = await this.asaas.createCalendarPayment({ ...(current.billingOptions as any), customer: current.asaasCustomerId,
+        const payment = await this.asaas.createCalendarPayment({ ...providerBillingOptions(current.billingOptions), customer: current.asaasCustomerId,
           billingType: (current.billingOptions as any)?.billingType || 'UNDEFINED', value: cycle.valueCents / 100,
           dueDate: cycle.dueDate, externalReference: reference, description: `Nodus - mensalidade ${month}` });
         this.validatePayment(payment, current.asaasCustomerId, reference, cycle);

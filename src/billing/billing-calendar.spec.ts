@@ -58,4 +58,14 @@ describe('Monthly billing calendar', () => {
     expect(prisma.tenant.update).toHaveBeenCalledWith({where:{id:'tenant'},data:{status:'ACTIVE'}});
   });
 
+  it('issues the scheduled plan price and keeps internal metadata out of Asaas payload',async()=>{
+    sub.billingOptions.planPriceSchedule=[{month:'2026-11',priceCents:29900}];
+    prisma.billingCycle.upsert.mockImplementation(async({create}:any)=>Object.assign(cycle,create));
+    asaas.createCalendarPayment.mockResolvedValue({id:'pay',customer:'cus',externalReference:billingReference(id,'2026-11'),value:299,dueDate:'2026-11-10',status:'PENDING'});
+    await service.issue(id,'2026-11-01');
+    expect(prisma.billingCycle.upsert).toHaveBeenCalledWith(expect.objectContaining({create:expect.objectContaining({valueCents:29900})}));
+    expect(asaas.createCalendarPayment).toHaveBeenCalledWith(expect.objectContaining({value:299}));
+    expect(asaas.createCalendarPayment.mock.calls[0][0]).not.toHaveProperty('planPriceSchedule');
+  });
+
 });
