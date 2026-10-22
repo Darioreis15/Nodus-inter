@@ -128,6 +128,16 @@ export class BillingSandbox {
       const row = await tx.billingDelivery.findUnique({ where: { cycleId_kind: { cycleId: cycle.id, kind: 'WHATSAPP' } } });
       if (!row) throw new ConflictException('Registro de envio nao encontrado. Atualize o teste por e-mail.');
       const target = { phone: dto.expectedPhone, channelId: dto.expectedChannelId };
+      // Only recover a preflight rejection: no provider attempt may have occurred.
+      if (row.state === 'SKIPPED' && row.error === 'SANDBOX_TARGET_CHANGED' && row.attemptedAt === null && row.providerId === null) {
+        const recovered = await tx.billingDelivery.updateMany({
+          where: { id: row.id, state: 'SKIPPED', error: 'SANDBOX_TARGET_CHANGED', attemptedAt: null, providerId: null },
+          data: { testTarget: target, state: 'QUEUED', error: null, nextAttemptAt: new Date() },
+        });
+        if (!recovered.count) throw new ConflictException('O teste mudou. Atualize a tela antes de confirmar novamente.');
+        await tx.auditEvent.create({ data: { tenantId, actorId, action: `billing.sandbox.whatsapp_reauthorized:${cycle.id}` } });
+        return row.id;
+      }
       if (row.testTarget) {
         const saved = row.testTarget as any;
         if (saved.phone !== target.phone || saved.channelId !== target.channelId) throw new ConflictException('Este teste ja foi autorizado para outro destino. Consulte o historico.');

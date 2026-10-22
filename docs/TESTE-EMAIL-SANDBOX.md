@@ -79,3 +79,5 @@ A autorização registra o número e canal. Mudanças posteriores não redirecio
 Rota Owner: `POST /owner/tenants/:id/sandbox-whatsapp`, JWT do proprietário, com `currentPassword`, `confirmation: "SANDBOX_WHATSAPP"`, `cycleId`, `expectedPhone` e `expectedChannelId`. Não cria cobranças. O `cycleId` aparece em `sandboxTest` no GET de configuração dos avisos.
 
 O celular financeiro aceita pontuação: `(31) 98888-7777` é salvo como `5531988887777`. Números brasileiros já com 55 são preservados. Para outros países, informe `+DDI`; ao reabrir o formulário, esse prefixo é preservado. A confirmação do teste usa o número normalizado salvo.
+
+Se o histórico mostrar “Destino do teste alterado; envio bloqueado”, salve o telefone e canal corretos, atualize a tela, informe sua senha e confirme novamente o teste WhatsApp. O sistema só reautoriza esse bloqueio quando não existe tentativa nem identificador de envio ao provedor. Envios aceitos ou incertos não são reiniciados. A mesma cobrança é reutilizada, sem novo e-mail.
