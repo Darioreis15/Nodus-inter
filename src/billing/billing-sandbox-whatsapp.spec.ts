@@ -8,8 +8,8 @@ describe('Sandbox WhatsApp authorization', () => {
   process.env={...env,PLATFORM_OWNER_USER_ID:actorId,BILLING_SANDBOX_TEST_ENABLED:'true',BILLING_DELIVERY_ENABLED:'true',ASAAS_BASE_URL:'https://api-sandbox.asaas.com/v3'};
   const actor={id:actorId,tenantId:'nodus',role:'ADMIN',mustChangePassword:false,tokenVersion:1,passwordHash:bcrypt.hashSync('correct',4)};
   sub={id:'sub',tenantId:'tenant',status:'ACTIVE',deliveryEnabled:true,deliverySettings:{whatsappEnabled:true,phone:'5531999999999',channelId:'channel'}};
-  row={id:'wa',state:'SKIPPED',error:'SANDBOX_EMAIL_ONLY',testTarget:null};
-  prisma={user:{findUnique:jest.fn(async()=>actor)},subscription:{findUnique:jest.fn(async()=>sub)},channel:{findFirst:jest.fn(async()=>({id:'channel'}))},billingCycle:{findFirst:jest.fn(async()=>({id:'cycle'}))},billingDelivery:{findUnique:jest.fn(async()=>row),findUniqueOrThrow:jest.fn(async()=>row),update:jest.fn(async({data})=>Object.assign(row,data))},auditEvent:{create:jest.fn()},$queryRaw:jest.fn(),$transaction:jest.fn(async fn=>fn(prisma))};
+  row={id:'wa',state:'SKIPPED',error:'SANDBOX_EMAIL_ONLY',testTarget:null,attemptedAt:null,providerId:null};
+  prisma={user:{findUnique:jest.fn(async()=>actor)},subscription:{findUnique:jest.fn(async()=>sub)},channel:{findFirst:jest.fn(async()=>({id:'channel'}))},billingCycle:{findFirst:jest.fn(async()=>({id:'cycle'}))},billingDelivery:{findUnique:jest.fn(async()=>row),findUniqueOrThrow:jest.fn(async()=>row),updateMany:jest.fn(async({data})=>{Object.assign(row,data);return {count:1};}),update:jest.fn(async({data})=>Object.assign(row,data))},auditEvent:{create:jest.fn()},$queryRaw:jest.fn(),$transaction:jest.fn(async fn=>fn(prisma))};
   asaas={createCalendarPayment:jest.fn()};delivery={process:jest.fn(async()=>{if(row.state==='QUEUED')row.state='SENT';})};
   service=new BillingSandbox(prisma,asaas,delivery);dto={currentPassword:'correct',confirmation:'SANDBOX_WHATSAPP',cycleId:'cycle',expectedPhone:'5531999999999',expectedChannelId:'channel'};
  });
@@ -40,4 +40,23 @@ describe('Sandbox WhatsApp authorization', () => {
   sub.deliverySettings.phone='5531888888888';
   await expect(service.whatsapp('tenant',actorId,{...dto,expectedPhone:sub.deliverySettings.phone})).rejects.toThrow('outro destino');
  });
+ it.each([null,{phone:'31999999999',channelId:'old-channel'}])('reauthorizes a never-attempted target rejection with the current confirmed destination',async previous=>{
+  row.error='SANDBOX_TARGET_CHANGED';row.testTarget=previous;
+  await service.whatsapp('tenant',actorId,dto);await service.whatsapp('tenant',actorId,dto);
+  expect(row.testTarget).toEqual({phone:dto.expectedPhone,channelId:dto.expectedChannelId});
+  expect(prisma.billingDelivery.updateMany).toHaveBeenCalledTimes(1);
+  expect(prisma.billingDelivery.updateMany).toHaveBeenCalledWith(expect.objectContaining({where:expect.objectContaining({attemptedAt:null,providerId:null,state:'SKIPPED',error:'SANDBOX_TARGET_CHANGED'})}));
+  expect(row.state).toBe('SENT');expect(asaas.createCalendarPayment).not.toHaveBeenCalled();
+ });
+ it.each([{attemptedAt:new Date()}, {providerId:'provider-message'}])('does not recover a rejection with evidence of an attempt',async evidence=>{
+  Object.assign(row,{error:'SANDBOX_TARGET_CHANGED',testTarget:{phone:dto.expectedPhone,channelId:dto.expectedChannelId}},evidence);
+  await service.whatsapp('tenant',actorId,dto);
+  expect(row.state).toBe('SKIPPED');expect(prisma.billingDelivery.updateMany).not.toHaveBeenCalled();
+ });
+ it('rejects stale destination before recovery',async()=>{
+  row.error='SANDBOX_TARGET_CHANGED';
+  await expect(service.whatsapp('tenant',actorId,{...dto,expectedPhone:'31999999999'})).rejects.toThrow('Salve');
+  expect(prisma.billingDelivery.updateMany).not.toHaveBeenCalled();
+ });
+
 });
