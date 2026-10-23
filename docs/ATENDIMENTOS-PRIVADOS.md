@@ -5,6 +5,7 @@
 - Conversas sem atendente ficam na fila da empresa e podem ser assumidas pelos operadores.
 - Ao clicar em **Assumir**, a conversa passa a ficar disponível ao responsável e aos administradores da mesma empresa. O nome aparece abaixo do contato, na lista e no cabeçalho.
 - O operador não pode consultar, alterar, enviar mensagens, baixar anexos, abrir fotos ou ler/escrever observações de uma conversa atribuída a outro operador, mesmo conhecendo seu ID.
+- Antes de assumir, o envio de texto, anexo e template pelo app fica bloqueado (HTTP 403). Isso vale também para administradores: visualizar não dá permissão de responder. Somente o responsável atual pode enviar. Após um encaminhamento, o destinatário já é o responsável e pode responder.
 - O administrador continua com acesso a todas as conversas da empresa e pode assumir ou encaminhar atendimentos.
 - **Encaminhar** abre a seleção dos usuários da mesma empresa. O operador precisa ser o responsável atual; administradores podem encaminhar diretamente. O histórico e as observações permanecem na mesma conversa.
 - O encaminhamento para um setor continua liberando o responsável e devolvendo o atendimento à fila.
@@ -26,7 +27,7 @@ Esta alteração não precisa de novas variáveis, seed ou migrações. O site i
 ## Homologação com três contas
 
 1. Entre com um administrador e dois operadores da mesma empresa, em navegadores/perfis separados.
-2. Na fila, o operador A assume uma conversa. Confira o nome abaixo do contato.
+2. Antes de assumir, confira que texto, anexo e template estão bloqueados, inclusive para o administrador. Na fila, o operador A assume uma conversa. Confira o nome abaixo do contato.
 3. No operador B, aguarde a atualização automática: a conversa deve desaparecer. Se estava aberta, o painel deve ser fechado. Uma consulta direta ao ID com o JWT de B deve retornar 404.
 4. No administrador, confira que a conversa continua disponível e mostra A como responsável.
 5. No operador A, clique em **Encaminhar**, selecione B e confirme.

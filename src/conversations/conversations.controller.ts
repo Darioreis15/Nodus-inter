@@ -1,4 +1,4 @@
-import { ConversationAccessGuard } from './conversation-access.guard';
+import { ConversationAccessGuard, RequireConversationAssignee } from './conversation-access.guard';
 import { ConversationVisibilityDto, TransferConversationDto } from './dto/conversation-visibility.dto';
 import { MessageMediaService } from './message-media.service';
 import { AttachmentSendService } from './attachment-send.service';
@@ -36,6 +36,7 @@ export class ConversationsController {
   }
 
   @Post(':id/template')
+  @RequireConversationAssignee()
   template(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: TemplateMessageDto) {
     return this.conversationsService.sendTemplate(user.tenantId, id, dto);
   }
@@ -92,12 +93,14 @@ export class ConversationsController {
   }
 
   @Post(':id/attachments')
+  @RequireConversationAssignee()
   @UseInterceptors(AttachmentUploadGate, FileInterceptor('file', attachmentUploadOptions))
   sendAttachment(@CurrentUser() user:AuthenticatedUser, @Param('id') id:string, @UploadedFile() file:AttachmentFile|undefined, @Body() dto:AttachmentDto) {
     return this.attachmentSender.send(user.tenantId,id,file,dto.caption);
   }
 
   @Post(':id/messages')
+  @RequireConversationAssignee()
   sendMessage(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
