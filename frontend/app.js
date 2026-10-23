@@ -1,3 +1,4 @@
+import { assignmentLabel, reconcileAssignments } from './conversation-assignment.js?v=1';
 import { renderMetaCosts } from './meta-costs.js?v=1';
 import { openImageViewer } from './image-viewer.js?v=23';
 import { createAttachmentPreviews } from './attachment-previews.js?v=22';
@@ -110,7 +111,7 @@ function emptyChat() { attachmentPreviews.clear(); $('#chat').className = 'chat 
 function drawList(query = $('#search')?.value || '') {
   const list = $('#conversation-list'); if (!list) return;
   const matches = sortConversations(session.conversations).filter(c => `${c.contact.name || ''} ${c.contact.waId} ${c.lastMessage?.body || ''}`.toLowerCase().includes(query.toLowerCase()));
-  list.innerHTML = matches.length ? matches.map(c => `<button class="conversation ${session.active?.id === c.id ? 'active' : ''}" data-id="${escape(c.id)}">${contactAvatar(c)}<div class="conversation-info"><div><strong>${escape(c.contact.name || c.contact.waId)}</strong><time>${escape(conversationTime(c))}</time></div><p>${escape(c.lastMessage?.body || (c.lastMessage?.media?.kind === 'image' ? '📷 Foto' : c.lastMessage?.media ? '📄 PDF' : 'Sem mensagens'))}</p><small>${escape(c.channel.name)}${c.departmentId ? ` · ${escape((session.departments || []).find(d => d.id === c.departmentId)?.name || 'Setor')}` : ''}</small></div></button>`).join('') : '<p class="no-results">Nenhum atendimento encontrado.</p>';
+  list.innerHTML = matches.length ? matches.map(c => `<button class="conversation ${session.active?.id === c.id ? 'active' : ''}" data-id="${escape(c.id)}">${contactAvatar(c)}<div class="conversation-info"><div><strong>${escape(c.contact.name || c.contact.waId)}</strong><time>${escape(conversationTime(c))}</time></div><small class="assignment-name">${escape(assignmentLabel(c))}</small><p>${escape(c.lastMessage?.body || (c.lastMessage?.media?.kind === 'image' ? '📷 Foto' : c.lastMessage?.media ? '📄 PDF' : 'Sem mensagens'))}</p><small>${escape(c.channel.name)}${c.departmentId ? ` · ${escape((session.departments || []).find(d => d.id === c.departmentId)?.name || 'Setor')}` : ''}</small></div></button>`).join('') : '<p class="no-results">Nenhum atendimento encontrado.</p>';
   contactPhotos.observe(list);
   $$('.conversation', list).forEach(btn => btn.onclick = () => openConversation(btn.dataset.id));
 }
@@ -134,10 +135,20 @@ async function openConversation(id) {
   attachmentPreviews.clear();
   session.page = null; session.active = c; const generation = ++session.generation;
   drawList(); const chat = $('#chat'); chat.className = 'chat mobile-open';
-  chat.innerHTML = `<header class="chat-header"><button class="icon-btn mobile-back" aria-label="Voltar às conversas">←</button>${contactAvatar(c)}<div><h2>${escape(c.contact.name || c.contact.waId)}</h2><p>${escape(c.contact.waId)} · ${escape(c.channel.name)}</p></div><div class="chat-actions"><button class="outline" id="conversation-notes">Observações</button><button class="outline" id="rename-contact">Nome</button><button class="outline" id="transfer-department">Setor</button><button class="outline" id="assign">Assumir</button><button class="resolve" id="resolve">Resolver ✓</button>${c.channel.type === 'QR_EVOLUTION' ? '<button class="danger outline" id="delete-conversation">Excluir</button>' : '<button class="outline" id="send-template">Template</button>'}</div></header><button class="text-button" id="older-messages" hidden>Carregar mensagens anteriores</button><div id="messages" class="messages"><p class="loading">Carregando…</p></div><form id="message-form" class="composer"><button type="button" class="outline attach-button" id="attach-file" aria-label="Anexar foto ou PDF" title="Anexar foto ou PDF">📎</button><textarea name="text" rows="2" maxlength="4000" placeholder="Escreva uma mensagem" aria-label="Mensagem" required></textarea><button class="send" type="submit" aria-label="Enviar mensagem">➜</button></form>`;
+  chat.innerHTML = `<header class="chat-header"><button class="icon-btn mobile-back" aria-label="Voltar às conversas">←</button>${contactAvatar(c)}<div><h2>${escape(c.contact.name || c.contact.waId)}</h2><p id="assigned-user-name">${escape(assignmentLabel(c))}</p><p>${escape(c.contact.waId)} · ${escape(c.channel.name)}</p></div><div class="chat-actions"><button class="outline" id="conversation-notes">Observações</button><button class="outline" id="rename-contact">Nome</button><button class="outline" id="transfer-department">Setor</button><button class="outline" id="assign">Assumir</button><button class="outline" id="transfer-user">Encaminhar</button><button class="resolve" id="resolve">Resolver ✓</button>${c.channel.type === 'QR_EVOLUTION' ? '<button class="danger outline" id="delete-conversation">Excluir</button>' : '<button class="outline" id="send-template">Template</button>'}</div></header><button class="text-button" id="older-messages" hidden>Carregar mensagens anteriores</button><div id="messages" class="messages"><p class="loading">Carregando…</p></div><form id="message-form" class="composer"><button type="button" class="outline attach-button" id="attach-file" aria-label="Anexar foto ou PDF" title="Anexar foto ou PDF">📎</button><textarea name="text" rows="2" maxlength="4000" placeholder="Escreva uma mensagem" aria-label="Mensagem" required></textarea><button class="send" type="submit" aria-label="Enviar mensagem">➜</button></form>`;
   $('.mobile-back').onclick = () => { chat.classList.remove('mobile-open'); };
   $('#transfer-department').onclick = async () => { const w = await api('/workspace'); modal('Encaminhar para setor', `<form id="transfer-form"><label>Setor<select name="departmentId">${departmentOptions(w.departments || [],c.departmentId)}</select></label><p>A transferência libera o atendente atual e mantém a conversa na fila.</p><button class="primary">Encaminhar</button></form>`); bindForm('#transfer-form', async data => { await api(`/conversations/${encoded(id)}/department`, { method:'PATCH', body:body({ departmentId:data.departmentId || null }) }); $('#modal').close(); await loadConversations(session.filter); }); };
-  $('#assign').onclick = e => busy(e.currentTarget, async () => { await api(`/conversations/${encoded(id)}/assign`, { method:'PATCH', body:'{}' }); notice('Atendimento atribuído a você.'); });
+  $('#assign').onclick = async e => { await busy(e.currentTarget, async () => {
+    try {
+      const updated=await api(`/conversations/${encoded(id)}/assign`, {method:'PATCH',body:'{}'});
+      if(session.active?.id !== id)return;
+      Object.assign(c,{assignedUserId:updated.assignedUserId,assignedUser:updated.assignedUser,pipelineStage:updated.pipelineStage});
+      drawList();updateAssignmentHeader();nextListRefresh=0;
+      notice('Atendimento atribuído a você.');
+    } catch(error) { if(error.status===404 || error.status===409) forgetConversation(id); throw error; }
+  }); updateAssignmentHeader(); };
+  $('#transfer-user').onclick=e=>busy(e.currentTarget,()=>transferConversation(c));
+  updateAssignmentHeader();
   $('#resolve').onclick = e => busy(e.currentTarget, async () => { await api(`/conversations/${encoded(id)}/status`, { method:'PATCH', body:body({ status:'RESOLVED' }) }); await loadConversations(session.filter); notice('Atendimento finalizado.'); });
   contactPhotos.observe(chat);
   $('#rename-contact').onclick = () => { modal('Nome do contato', `<form id="name-form"><label>Nome<input name="name" maxlength="120" value="${escape(c.contact.name || '')}" required></label><button type="submit" class="primary">Salvar</button></form>`); bindForm('#name-form', async data => { await api(`/conversations/${encoded(id)}/contact`, { method:'PATCH', body:body(data) }); c.contact.name = data.name; $('#modal').close(); openConversation(id); }); };
@@ -151,7 +162,7 @@ async function openConversation(id) {
   });
   $('#conversation-notes').onclick = () => openConversationNotes(id);
   $('#attach-file').onclick = () => attachFile(c);
-  if(c.status==='RESOLVED'){ $$('#message-form button, #message-form textarea, #assign, #resolve, #transfer-department, #send-template').forEach(el=>el.disabled=true);$('#message-form textarea').placeholder='Atendimento finalizado. Use Nova conversa para continuar.'; }
+  if(c.status==='RESOLVED'){ $$('#message-form button, #message-form textarea, #assign, #transfer-user, #resolve, #transfer-department, #send-template').forEach(el=>el.disabled=true);$('#message-form textarea').placeholder='Atendimento finalizado. Use Nova conversa para continuar.'; }
   $('#older-messages').onclick = e => busy(e.currentTarget, async () => {
     const oldest = [...session.messages].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id.localeCompare(b.id))[0];
     const rows = await api(`/conversations/${encoded(id)}/messages?cursor=${encoded(oldest.id)}`);
@@ -159,7 +170,7 @@ async function openConversation(id) {
     session.messages = [...session.messages, ...rows.filter(m => !session.messages.some(x => x.id === m.id))];
     $('#older-messages').hidden = rows.length < 100; drawMessages(false);
   });
-  try { const rows = await api(`/conversations/${encoded(id)}/messages`); if (generation !== session.generation) return; session.messages = rows; $('#older-messages').hidden = rows.length < 100; drawMessages(); } catch (err) { if ($('#messages')) $('#messages').textContent = err.message; }
+  try { const rows = await api(`/conversations/${encoded(id)}/messages`); if (generation !== session.generation) return; session.messages = rows; $('#older-messages').hidden = rows.length < 100; drawMessages(); } catch (err) { if (generation !== session.generation) return; if (err.status===404) { forgetConversation(id); notice(err.message); } else if ($('#messages')) $('#messages').textContent = err.message; }
 }
 function drawMessages(bottom = true) {
   const el = $('#messages'); if (!el) return;
@@ -462,7 +473,7 @@ function departmentOptions(departments, selected) { return '<option value="">Sem
 async function automationsPage() {
   const root = $('#page-content');
   const [settings, users] = await Promise.all([api('/workspace'), api('/users')]); if (root !== $('#page-content') || session.page !== 'automations') return;
-  $('#page-content').innerHTML = `<div class="page-grid"><section class="card"><h2>Regras de conversa</h2><form id="automations-form"><label>Resposta fora do expediente<textarea name="awayMessage" maxlength="4000" rows="4">${escape(settings.awayMessage)}</textarea></label><p class="muted">Enviada ao iniciar uma conversa fora do horário definido em Configurações → Expediente.</p><label>Encaminhar resposta fora do expediente para<select name="awayDepartmentId" data-department-select>${departmentOptions(settings.departments || [], settings.awayDepartmentId)}</select></label><h2>Automações criadas</h2><p class="muted">Cada automação é uma regra de conversa, separada das colunas do funil automático. Abra para editar ou use “Criar próxima etapa” para continuar o fluxo. As alterações entram em vigor ao clicar em Salvar automações.</p><p id="stage-count" class="muted" aria-live="polite"></p><p class="muted">Quando o cliente enviar a palavra-chave exata, a conversa muda de etapa e recebe a mensagem configurada. O operador só é atribuído se estiver disponível. Sem disponibilidade, a conversa permanece na fila.</p><div id="stage-fields"></div><button type="button" class="outline" id="add-stage">+ Nova automação</button><button class="primary" type="submit">Salvar automações</button></form></section><section class="card"><h2>Setores de atendimento</h2><p class="muted">Crie as filas e selecione o destino em cada resposta. Setores organizam a fila; os operadores da empresa continuam podendo atender todos os setores.</p><form id="department-form"><div id="department-fields"></div><button type="button" id="add-department" class="outline">+ Adicionar setor</button><button class="primary">Salvar setores</button></form><h2>Boas-vindas por canal</h2><p class="muted">Configure a resposta no início de uma conversa para cada WhatsApp conectado.</p><div id="automation-channels"></div></section></div>`;
+  $('#page-content').innerHTML = `<div class="page-grid"><section class="card"><h2>Regras de conversa</h2><form id="automations-form"><label>Resposta fora do expediente<textarea name="awayMessage" maxlength="4000" rows="4">${escape(settings.awayMessage)}</textarea></label><p class="muted">Enviada ao iniciar uma conversa fora do horário definido em Configurações → Expediente.</p><label>Encaminhar resposta fora do expediente para<select name="awayDepartmentId" data-department-select>${departmentOptions(settings.departments || [], settings.awayDepartmentId)}</select></label><h2>Automações criadas</h2><p class="muted">Cada automação é uma regra de conversa, separada das colunas do funil automático. Abra para editar ou use “Criar próxima etapa” para continuar o fluxo. As alterações entram em vigor ao clicar em Salvar automações.</p><p id="stage-count" class="muted" aria-live="polite"></p><p class="muted">Quando o cliente enviar a palavra-chave exata, a conversa muda de etapa e recebe a mensagem configurada. O operador só é atribuído se estiver disponível. Sem disponibilidade, a conversa permanece na fila.</p><div id="stage-fields"></div><button type="button" class="outline" id="add-stage">+ Nova automação</button><button class="primary" type="submit">Salvar automações</button></form></section><section class="card"><h2>Setores de atendimento</h2><p class="muted">Crie as filas e selecione o destino em cada resposta. Setores organizam a fila. Após assumir, o atendimento fica disponível ao responsável e aos administradores.</p><form id="department-form"><div id="department-fields"></div><button type="button" id="add-department" class="outline">+ Adicionar setor</button><button class="primary">Salvar setores</button></form><h2>Boas-vindas por canal</h2><p class="muted">Configure a resposta no início de uma conversa para cada WhatsApp conectado.</p><div id="automation-channels"></div></section></div>`;
   const rulesForm = $('#automations-form');
   const awayOptions = document.createElement('details'); awayOptions.className = 'away-settings';
   awayOptions.innerHTML = '<summary><strong>Resposta fora do expediente</strong><span class="automation-edit">Configurar mensagem e encaminhamento</span></summary><div class="away-options"></div>';
@@ -627,7 +638,7 @@ async function refreshPipelineBoard(){
     const signature=JSON.stringify(rows);if(board._signature===signature)return;board._signature=signature;
     const stage=c=>c.status==='RESOLVED'?'RESOLVED':c.pipelineStage || (c.assignedUserId?'IN_SERVICE':'QUEUE');
     const scroll=board.scrollLeft;
-    board.innerHTML=Object.entries(pipelineLabels).map(([id,name])=>{const items=rows.filter(c=>stage(c)===id);return `<section class="card funnel-column"><h2>${name} <small>${items.length}</small></h2>${items.map(c=>`<article class="funnel-item"><strong>${escape(c.contact.name || c.contact.waId)}</strong><p>${escape(c.lastMessage?.body || (c.lastMessage?.media ? '📎 Anexo' : 'Sem mensagens'))}</p><small>${escape(c.channel.name)}${c.replyDueAt?` · Prazo: ${escape(date(c.replyDueAt))}`:''}</small><button class="outline" data-open-pipeline="${escape(c.id)}">Abrir conversa</button></article>`).join('') || '<p class="muted">Sem conversas nesta etapa.</p>'}</section>`;}).join('');board.scrollLeft=scroll;
+    board.innerHTML=Object.entries(pipelineLabels).map(([id,name])=>{const items=rows.filter(c=>stage(c)===id);return `<section class="card funnel-column"><h2>${name} <small>${items.length}</small></h2>${items.map(c=>`<article class="funnel-item"><strong>${escape(c.contact.name || c.contact.waId)}</strong><small class="assignment-name">${escape(assignmentLabel(c))}</small><p>${escape(c.lastMessage?.body || (c.lastMessage?.media ? '📎 Anexo' : 'Sem mensagens'))}</p><small>${escape(c.channel.name)}${c.replyDueAt?` · Prazo: ${escape(date(c.replyDueAt))}`:''}</small><button class="outline" data-open-pipeline="${escape(c.id)}">Abrir conversa</button></article>`).join('') || '<p class="muted">Sem conversas nesta etapa.</p>'}</section>`;}).join('');board.scrollLeft=scroll;
     $$('[data-open-pipeline]',board).forEach(button=>button.onclick=()=>{const c=rows.find(c=>c.id===button.dataset.openPipeline);if(!session.conversations.some(x=>x.id===c.id))session.conversations.push(c);else Object.assign(session.conversations.find(x=>x.id===c.id),c);openConversation(c.id);});
   }finally{pipelineRefreshing=false;}
 }
@@ -635,7 +646,7 @@ async function legacyFunnelPage() {
   const root = $('#page-content');
   const [settings, open, pending] = await Promise.all([api('/workspace'), api('/conversations?status=OPEN'), api('/conversations?status=PENDING')]); if (root !== $('#page-content') || session.page !== 'funnel') return;
   const rows = [...open, ...pending]; const stages = [{ id:'', name:'Sem etapa' }, ...settings.stages];
-  $('#page-content').innerHTML = `<button class="outline" id="back-pipeline">Voltar ao funil automático</button><p class="muted">Mostrando até 100 conversas abertas e 100 aguardando, das mais recentes. Mover uma conversa aqui não envia mensagem. Configure mensagens por palavra-chave na aba Automações.</p><div class="funnel-board">${stages.map(s => `<section class="card funnel-column"><h2>${escape(s.name)}</h2>${rows.filter(c => s.id ? c.funnelStage === s.id : !settings.stages.some(x => x.id === c.funnelStage)).map(c => `<article class="funnel-item"><strong>${escape(c.contact.name || c.contact.waId)}</strong><p>${escape(c.lastMessage?.body || (c.lastMessage?.media?.kind === 'image' ? '📷 Foto' : c.lastMessage?.media ? '📄 PDF' : 'Sem mensagens'))}</p><label>Etapa<select data-conversation="${escape(c.id)}"><option value="" disabled ${!c.funnelStage ? 'selected' : ''}>Selecionar etapa</option>${settings.stages.map(x => `<option value="${escape(x.id)}" ${x.id === c.funnelStage ? 'selected' : ''}>${escape(x.name)}</option>`).join('')}</select></label></article>`).join('') || '<p class="muted">Sem conversas nesta etapa.</p>'}</section>`).join('')}</div>`;
+  $('#page-content').innerHTML = `<button class="outline" id="back-pipeline">Voltar ao funil automático</button><p class="muted">Mostrando até 100 conversas abertas e 100 aguardando, das mais recentes. Mover uma conversa aqui não envia mensagem. Configure mensagens por palavra-chave na aba Automações.</p><div class="funnel-board">${stages.map(s => `<section class="card funnel-column"><h2>${escape(s.name)}</h2>${rows.filter(c => s.id ? c.funnelStage === s.id : !settings.stages.some(x => x.id === c.funnelStage)).map(c => `<article class="funnel-item"><strong>${escape(c.contact.name || c.contact.waId)}</strong><small class="assignment-name">${escape(assignmentLabel(c))}</small><p>${escape(c.lastMessage?.body || (c.lastMessage?.media?.kind === 'image' ? '📷 Foto' : c.lastMessage?.media ? '📄 PDF' : 'Sem mensagens'))}</p><label>Etapa<select data-conversation="${escape(c.id)}"><option value="" disabled ${!c.funnelStage ? 'selected' : ''}>Selecionar etapa</option>${settings.stages.map(x => `<option value="${escape(x.id)}" ${x.id === c.funnelStage ? 'selected' : ''}>${escape(x.name)}</option>`).join('')}</select></label></article>`).join('') || '<p class="muted">Sem conversas nesta etapa.</p>'}</section>`).join('')}</div>`;
   $('#back-pipeline').onclick = () => { session.funnelLegacy=false; funnelPage().catch(e=>notice(e.message)); };
   $$('[data-conversation]').forEach(select => select.onchange = async () => { select.disabled = true; try { await api(`/conversations/${encoded(select.dataset.conversation)}/stage`, { method:'PATCH', body:body({ stageId:select.value }) }); await legacyFunnelPage(); } catch (err) { notice(err.message); select.disabled = false; } });
 }
@@ -645,7 +656,7 @@ async function logsPage() {
   $('#page-content').innerHTML = '<section class="card"><div id="logs-list"></div><button class="outline" id="more-logs">Carregar mais</button></section>';
   const load = async () => {
     const rows = await api(`/conversations?status=RESOLVED${cursor ? `&cursor=${encoded(cursor)}` : ''}`); if (root !== $('#page-content') || session.page !== 'logs') return;
-    $('#logs-list').insertAdjacentHTML('beforeend', rows.map(c => `<article class="data-row"><div class="avatar">✓</div><div><strong>${escape(c.contact.name || c.contact.waId)}</strong><p>${escape(c.lastMessage?.body || '')}</p><p>Finalizado por: <strong>${escape(c.resolvedByName || 'Não registrado (histórico anterior)')}</strong><br>${escape(date(c.resolvedAt))}</p></div><span class="role">${escape(c.channel.name)}</span></article>`).join('') || (!cursor ? '<p class="muted">Nenhuma conversa finalizada.</p>' : ''));
+    $('#logs-list').insertAdjacentHTML('beforeend', rows.map(c => `<article class="data-row"><div class="avatar">✓</div><div><strong>${escape(c.contact.name || c.contact.waId)}</strong><small class="assignment-name">${escape(assignmentLabel(c))}</small><p>${escape(c.lastMessage?.body || '')}</p><p>Finalizado por: <strong>${escape(c.resolvedByName || 'Não registrado (histórico anterior)')}</strong><br>${escape(date(c.resolvedAt))}</p></div><span class="role">${escape(c.channel.name)}</span></article>`).join('') || (!cursor ? '<p class="muted">Nenhuma conversa finalizada.</p>' : ''));
     cursor = rows.at(-1)?.id; $('#more-logs').hidden = rows.length < 100;
   };
   $('#more-logs').onclick = e => busy(e.currentTarget, load); await load();
@@ -697,7 +708,7 @@ const autoRefresh = createAutoRefresh({
       try { rows = await api(`/conversations/${encoded(id)}/messages`); }
       catch (err) {
         if (!current()) return;
-        if (err.status === 404) { session.active = null; emptyChat(); nextListRefresh = 0; notice('Esta conversa não está mais disponível.'); }
+        if (err.status === 404) { forgetConversation(id); nextListRefresh = 0; notice('Este atendimento não está mais disponível para você.'); }
         else throw err;
       }
       if (!current()) return;
@@ -715,7 +726,19 @@ const autoRefresh = createAutoRefresh({
     const rows = await api(`/conversations?status=${encoded(session.filter)}&departmentId=${encoded($('#department-filter')?.value || '')}`);
     if (!current()) return;
     nextListRefresh = Date.now() + 10000;
-    const merged = mergeRecent(session.conversations, rows, 100, c => c.lastMessage?.createdAt || c.createdAt);
+    let merged = mergeRecent(session.conversations, rows, 100, c => c.lastMessage?.createdAt || c.createdAt);
+    const visible=[];
+    const ids=[...new Set([...merged.map(c=>c.id),...(session.active ? [session.active.id] : [])])];
+    for(let i=0;i<ids.length;i+=500){
+      visible.push(...await api('/conversations/visibility',{method:'POST',body:body({ids:ids.slice(i,i+500)})}));
+      if(!current())return;
+    }
+    merged=reconcileAssignments(merged,visible).filter(c=>c.status===session.filter);
+    if(session.active && !visible.some(c=>c.id===session.active.id)){
+      forgetConversation(session.active.id);
+      notice('O atendimento foi encaminhado ou assumido por outro usuário.');
+      return;
+    }
     if (JSON.stringify(merged) !== JSON.stringify(session.conversations)) {
       const active = session.active, updated = active && merged.find(c => c.id === active.id);
       if (updated) { Object.assign(active, updated); merged[merged.indexOf(updated)] = active; }
@@ -724,6 +747,7 @@ const autoRefresh = createAutoRefresh({
       drawList(); list.scrollTop = scrollTop;
       $('#more-conversations').hidden = rows.length < 100 && merged.length < 100;
     }
+    if(session.active){const live=visible.find(c=>c.id===session.active.id);if(live)Object.assign(session.active,live);updateAssignmentHeader();}
   },
   onError: err => {
     if (!session.token || err.status === 401) return;
@@ -754,4 +778,35 @@ async function metaCostsPage() {
   const root = $('#page-content'), token = session.token;
   if (session.user?.role !== 'ADMIN') throw new Error('Acesso restrito ao administrador.');
   await renderMetaCosts({root, api, escape, current:() => root === $('#page-content') && session.page === 'metaCosts' && session.token === token});
+}
+
+function updateAssignmentHeader() {
+  const c=session.active;if(!c)return;
+  const label=$('#assigned-user-name');if(label)label.textContent=assignmentLabel(c);
+  const transfer=$('#transfer-user');if(transfer)transfer.disabled=c.status==='RESOLVED' || (session.user.role!=='ADMIN' && c.assignedUserId!==session.user.id);
+  const assign=$('#assign');if(assign){assign.textContent=c.assignedUserId===session.user.id ? 'Você está atendendo' : 'Assumir';assign.disabled=c.status==='RESOLVED' || c.assignedUserId===session.user.id;}
+}
+function forgetConversation(id) {
+  session.conversations=session.conversations.filter(c=>c.id!==id);
+  if(session.active?.id===id){
+    session.active=null;session.messages=[];session.generation++;
+    $('#modal')?.close();attachmentPreviews.clear();contactPhotos.clear();emptyChat();
+  }
+  nextListRefresh=0;if($('#conversation-list'))drawList();
+}
+async function transferConversation(c) {
+  const id=c.id,token=session.token;
+  const users=await api('/users');
+  if(session.active?.id!==id || session.token!==token)return;
+  const eligible=users.filter(u=>u.id!==c.assignedUserId);
+  if(!eligible.length){notice('Não há outro usuário cadastrado para receber este atendimento.');return;}
+  modal('Encaminhar atendimento',`<form id="transfer-user-form"><label>Responsável<select name="userId" required><option value="" disabled selected>Selecione um usuário</option>${eligible.map(u=>`<option value="${escape(u.id)}">${escape(u.name)}${u.role==='ADMIN' ? ' · Administrador' : ''}</option>`).join('')}</select></label><p>O histórico e as observações acompanham a conversa. O novo responsável recebe o atendimento, e os administradores continuam com acesso.</p><button class="primary" type="submit">Encaminhar atendimento</button></form>`);
+  bindForm('#transfer-user-form',async data=>{
+    await api(`/conversations/${encoded(id)}/transfer`,{method:'POST',body:body({userId:data.userId})});
+    if(session.token!==token)return;
+    $('#modal')?.close();
+    if(session.user.role!=='ADMIN' && data.userId!==session.user.id)forgetConversation(id);
+    await loadConversations(session.filter);
+    notice('Atendimento encaminhado com sucesso.');
+  });
 }

@@ -1,3 +1,4 @@
+import { ConversationAccessGuard } from './conversation-access.guard';
 import { Body, Controller, Get, Injectable, NotFoundException, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { Transform } from 'class-transformer';
 import { IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
@@ -30,7 +31,7 @@ export class ConversationNotesService {
   }
 }
 @Controller('conversations/:id/notes')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ConversationAccessGuard)
 export class ConversationNotesController {
   constructor(private notes:ConversationNotesService) {}
   @Get() list(@CurrentUser() user:AuthenticatedUser,@Param('id') id:string,@Query() query:NotesQuery) {return this.notes.list(user.tenantId,id,query.cursor);}
