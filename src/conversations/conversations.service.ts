@@ -1,3 +1,5 @@
+import { conversationAccess } from './conversation-access.guard';
+import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { phoneAliases, resolveContact } from './contact-identity';
 import { validateOutboundFile } from './outbound-file';
 import type { AttachmentFile } from './attachment-upload';
@@ -17,6 +19,7 @@ import { ConversationRecord } from './conversation.types';
 import { OutboundWebhooksService } from '../outbound-webhooks/outbound-webhooks.service';
 
 interface ListFilters {
+  viewer?: AuthenticatedUser;
   cursor?: string;
   status?: 'OPEN' | 'PENDING' | 'RESOLVED';
   assignedUserId?: string;
@@ -213,6 +216,7 @@ export class ConversationsService {
           WHERE m.conversation_id = c.id), c."createdAt") AS at
         FROM conversations c JOIN channels ch ON ch.id = c.channel_id
         WHERE ch.tenant_id = ${tenantId}
+          ${filters.viewer?.role === 'AGENT' ? Prisma.sql`AND (c.assigned_user_id IS NULL OR c.assigned_user_id = ${filters.viewer.userId})` : Prisma.empty}
           ${filters.status ? Prisma.sql`AND c.status::text = ${filters.status}` : Prisma.empty}
           ${filters.departmentId ? Prisma.sql`AND c.department_id = ${filters.departmentId}` : Prisma.empty}
           ${filters.assignedUserId ? Prisma.sql`AND c.assigned_user_id = ${filters.assignedUserId}` : Prisma.empty}
@@ -226,12 +230,14 @@ export class ConversationsService {
       where: {
         channel: { tenantId },
         id: {in:page.map(row=>row.id)},
+        ...(filters.viewer?.role === 'AGENT' ? {OR:[{assignedUserId:null},{assignedUserId:filters.viewer.userId}]} : {}),
         ...(filters.departmentId ? { departmentId: filters.departmentId } : {}),
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.assignedUserId ? { assignedUserId: filters.assignedUserId } : {}),
       },
       include: {
         contact: true,
+        assignedUser: { select: { id: true, name: true } },
         channel: { select: { id: true, name: true, type: true } },
         messages: { orderBy: [{ createdAt: 'desc' }, {id:'desc'}], take: 1, select: { id: true, direction: true, body: true, status: true, createdAt: true, fromNumber: true, toNumber: true, media: true } },
       },
@@ -243,6 +249,7 @@ export class ConversationsService {
       id: c.id,
       status: c.status,
       assignedUserId: c.assignedUserId,
+      assignedUser: c.assignedUser,
       resolvedByName: c.resolvedByName,
       resolvedAt: c.resolvedAt,
       funnelStage: c.funnelStage,
@@ -278,27 +285,29 @@ export class ConversationsService {
     });
   }
 
-  async assign(tenantId: string, conversationId: string, userId: string) {
-    const owned=await this.findOwnedConversation(tenantId, conversationId);
-    if(owned.status==='RESOLVED') throw new ForbiddenException('Atendimento finalizado. Inicie uma nova conversa.');
+  async visibleAssignments(user: AuthenticatedUser, ids: string[]) {
+    if (!ids.length) return [];
+    return this.prisma.conversation.findMany({where:{id:{in:ids},...conversationAccess(user)},select:{id:true,status:true,assignedUserId:true,assignedUser:{select:{id:true,name:true}}}});
+  }
 
-    const user = await this.prisma.user.findFirst({ where: { id: userId, tenantId } });
-    if (!user) {
-      throw new ForbiddenException('Esse usuario nao pertence a esse tenant.');
-    }
-
-    const updated = await this.prisma.conversation.update({
-      where: { id: conversationId },
-      data: { assignedUserId: userId, pipelineStage:'IN_SERVICE', replyDueAt:null },
+  async assign(tenantId: string, conversationId: string, userId: string, actor?: AuthenticatedUser, transfer = false) {
+    const updated = await this.prisma.$transaction(async tx => {
+      // The row lock makes simultaneous claims mutually exclusive.
+      await tx.$queryRaw`SELECT c.id FROM conversations c JOIN channels ch ON ch.id = c.channel_id WHERE c.id = ${conversationId} AND ch.tenant_id = ${tenantId} FOR UPDATE OF c`;
+      const owned=await tx.conversation.findFirst({where:{id:conversationId,channel:{tenantId}}});
+      if (!owned) throw new NotFoundException('Conversa nao encontrada.');
+      if(owned.status==='RESOLVED') throw new ForbiddenException('Atendimento finalizado. Inicie uma nova conversa.');
+      if (actor && actor.role !== 'ADMIN') {
+        if (owned.assignedUserId && owned.assignedUserId !== actor.userId) throw new ConflictException('Outro atendente ja assumiu esta conversa.');
+        if (owned.assignedUserId !== actor.userId && (transfer || userId !== actor.userId)) throw new ForbiddenException('Assuma o atendimento antes de encaminhar.');
+      }
+      const user=await tx.user.findFirst({where:{id:userId,tenantId},select:{id:true,name:true}});
+      if (!user) throw new ForbiddenException('Esse usuario nao pertence a essa empresa.');
+      const row=await tx.conversation.update({where:{id:conversationId},data:{assignedUserId:userId,pipelineStage:'IN_SERVICE',replyDueAt:null,pendingAutomation:Prisma.DbNull,automationCompleted:true},include:{assignedUser:{select:{id:true,name:true}}}});
+      await tx.auditEvent.create({data:{tenantId,actorId:actor?.userId,action:`conversation.${transfer ? 'transferred' : 'assigned'}:${conversationId}:${userId}`}});
+      return row;
     });
-
-    this.outboundWebhooks
-      .dispatch(tenantId, 'conversation.assigned', {
-        conversationId,
-        assignedUserId: userId,
-      })
-      .catch(() => {});
-
+    this.outboundWebhooks.dispatch(tenantId,'conversation.assigned',{conversationId,assignedUserId:userId}).catch(()=>{});
     return updated;
   }
 
@@ -333,7 +342,7 @@ export class ConversationsService {
     return messages.map(message => ({ ...message, media: publicMedia(message.media) }));
   }
 
-  async start(tenantId: string, dto: StartConversationDto) {
+  async start(tenantId: string, dto: StartConversationDto, actor?: AuthenticatedUser) {
     return this.prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`;
       const channel = await tx.channel.findFirst({ where: { id: dto.channelId, tenantId } });
@@ -341,6 +350,7 @@ export class ConversationsService {
       await tx.$queryRaw`SELECT id FROM channels WHERE id = ${channel.id} FOR UPDATE`;
       const contact = await resolveContact(tx, tenantId, channel.id, dto.phone, dto.name);
       const existing = await tx.conversation.findFirst({ where: { channelId: channel.id, contactId: contact.id, status: { in: ['OPEN', 'PENDING'] } } });
+      if (existing && actor?.role === 'AGENT' && existing.assignedUserId && existing.assignedUserId !== actor.userId) throw new NotFoundException('Este contato ja esta em atendimento com outro usuario.');
       return existing || tx.conversation.create({ data: { channelId: channel.id, contactId: contact.id } });
     });
   }

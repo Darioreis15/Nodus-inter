@@ -1,3 +1,5 @@
+import { ConversationAccessGuard } from './conversation-access.guard';
+import { ConversationVisibilityDto, TransferConversationDto } from './dto/conversation-visibility.dto';
 import { MessageMediaService } from './message-media.service';
 import { AttachmentSendService } from './attachment-send.service';
 import { AttachmentDto, AttachmentFile, AttachmentUploadGate, attachmentUploadOptions } from './attachment-upload';
@@ -14,15 +16,25 @@ import { AssignConversationDto } from './dto/assign-conversation.dto';
 import { UpdateConversationStatusDto } from './dto/update-status.dto';
 import { SendConversationMessageDto } from './dto/send-message.dto';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ConversationAccessGuard)
 @Controller('conversations')
 export class ConversationsController {
   constructor(private conversationsService: ConversationsService, private photos: ContactPhotosService, private media: MessageMediaService, private attachmentSender: AttachmentSendService) {}
 
   @Post()
   start(@CurrentUser() user: AuthenticatedUser, @Body() dto: StartConversationDto) {
-    return this.conversationsService.start(user.tenantId, dto);
+    return this.conversationsService.start(user.tenantId, dto, user);
   }
+  @Post('visibility')
+  visibility(@CurrentUser() user: AuthenticatedUser, @Body() dto: ConversationVisibilityDto) {
+    return this.conversationsService.visibleAssignments(user, dto.ids);
+  }
+
+  @Post(':id/transfer')
+  transfer(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: TransferConversationDto) {
+    return this.conversationsService.assign(user.tenantId, id, dto.userId, user, true);
+  }
+
   @Post(':id/template')
   template(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: TemplateMessageDto) {
     return this.conversationsService.sendTemplate(user.tenantId, id, dto);
@@ -55,6 +67,7 @@ export class ConversationsController {
   ) {
     return this.conversationsService.listForTenant(user.tenantId, {
       status, cursor, departmentId,
+      viewer: user,
       assignedUserId: mine === 'true' ? user.userId : undefined,
     });
   }
@@ -99,7 +112,7 @@ export class ConversationsController {
     @Param('id') id: string,
     @Body() dto: AssignConversationDto,
   ) {
-    return this.conversationsService.assign(user.tenantId, id, dto.userId ?? user.userId);
+    return this.conversationsService.assign(user.tenantId, id, dto.userId ?? user.userId, user);
   }
 
   @Patch(':id/status')
