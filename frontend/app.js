@@ -1,4 +1,4 @@
-import { assignmentLabel, reconcileAssignments } from './conversation-assignment.js?v=1';
+import { assignmentLabel, reconcileAssignments, canReply, replyInstruction } from './conversation-assignment.js?v=2';
 import { renderMetaCosts } from './meta-costs.js?v=1';
 import { openImageViewer } from './image-viewer.js?v=23';
 import { createAttachmentPreviews } from './attachment-previews.js?v=22';
@@ -49,8 +49,8 @@ async function api(path, options = {}) {
 }
 async function busy(button, fn) {
   if (button.disabled) return;
-  button.disabled = true;
-  try { return await fn(); } catch (error) { notice(error.message); } finally { button.disabled = false; }
+  button.disabled = true; button.dataset.busy='true';
+  try { return await fn(); } catch (error) { notice(error.message); } finally { delete button.dataset.busy; button.disabled = false; updateAssignmentHeader(); }
 }
 function bindForm(id, fn) {
   const form = $(id);
@@ -155,6 +155,7 @@ async function openConversation(id) {
   if ($('#delete-conversation')) $('#delete-conversation').onclick = e => busy(e.currentTarget, async () => { if (!confirm('Excluir esta conversa e suas mensagens da plataforma? As cópias no celular e em outros sistemas permanecem.')) return; await api(`/conversations/${encoded(id)}`, { method:'DELETE' }); await loadConversations(session.filter); notice('Conversa excluída.'); });
   if ($('#send-template')) $('#send-template').onclick = () => sendTemplate(c);
   bindForm('#message-form', async (data, form) => {
+    assertCanReply(id);
     const text = data.text.trim(); if (!text) return;
     const sent = await api(`/conversations/${encoded(id)}/messages`, { method:'POST', body:body({ text }) });
     if (session.active?.id !== id) return;
@@ -219,6 +220,7 @@ async function openMessageMedia(id) {
   }
 }
 function attachFile(conversation) {
+  if(!canReply(session.active,session.user?.id) || session.active?.id!==conversation.id){notice(replyInstruction(conversation));return;}
   const meta = conversation.channel.type === 'OFFICIAL_META';
   const accepted = meta ? 'image/jpeg,image/png,application/pdf' : 'image/jpeg,image/png,image/webp,application/pdf';
   const dialog = modal('Enviar foto ou PDF', `<form id="attachment-form"><label>Arquivo<input type="file" name="file" accept="${accepted}" required></label><small>${meta ? 'Fotos JPEG/PNG: até 5 MB. PDF: até 10 MB. Requer mensagem do cliente nas últimas 24 horas.' : 'Fotos JPEG/PNG/WebP e PDF: até 10 MB.'}</small><div class="selected-attachment-preview" hidden></div><label>Legenda (opcional)<textarea name="caption" maxlength="1024" rows="2"></textarea></label><p class="form-error" hidden></p><button type="submit" class="primary">Enviar arquivo</button></form>`);
@@ -246,7 +248,7 @@ function attachFile(conversation) {
     event.preventDefault();busy(submit,async()=>{
       const token=session.token,id=conversation.id,file=input.files[0],caption=$('[name=caption]',form).value.trim();
       try {
-        validate(file);if(!token)throw new Error('Entre novamente para enviar.');
+        assertCanReply(id);validate(file);if(!token)throw new Error('Entre novamente para enviar.');
         error.hidden=true;submit.textContent='Enviando…';input.disabled=true;$('[name=caption]',form).disabled=true;
         const data=new FormData();data.append('file',file,file.name);data.append('caption',caption);
         const response=await fetch(`${API_URL}/conversations/${encoded(id)}/attachments`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:data,signal:AbortSignal.timeout(70000)});
@@ -272,8 +274,9 @@ async function newConversation() {
   } catch (err) { notice(err.message); }
 }
 function sendTemplate(c) {
+  if(!canReply(session.active,session.user?.id) || session.active?.id!==c.id){notice(replyInstruction(c));return;}
   modal('Template aprovado pela Meta', '<p>Use o nome exato e o idioma de um template aprovado. Esta tela aceita parâmetros de texto no corpo.</p><form id="template-form"><label>Nome do template<input name="name" required pattern="[a-z0-9_]+" placeholder="hello_world"></label><label>Idioma<input name="language" value="pt_BR" required></label><label>Parâmetros do corpo (um por linha, na ordem)<textarea name="parameters" rows="3"></textarea></label><button class="primary" type="submit">Enviar template</button></form>');
-  bindForm('#template-form', async data => { const result = await api(`/conversations/${encoded(c.id)}/template`, { method:'POST', body:body({ name:data.name, language:data.language, parameters:data.parameters ? data.parameters.split('\n') : [] }) }); $('#modal').close(); if (session.active?.id === c.id) { session.messages.push(result); c.lastMessage = result; drawList(); drawMessages(); } notice('Template enviado ao provedor. Aguarde a confirmação de entrega.'); });
+  bindForm('#template-form', async data => { assertCanReply(c.id); const result = await api(`/conversations/${encoded(c.id)}/template`, { method:'POST', body:body({ name:data.name, language:data.language, parameters:data.parameters ? data.parameters.split('\n') : [] }) }); $('#modal').close(); if (session.active?.id === c.id) { session.messages.push(result); c.lastMessage = result; drawList(); drawMessages(); } notice('Template enviado ao provedor. Aguarde a confirmação de entrega.'); });
 }
 function openPage(page) {
   if (session.page === page && $('#page-content')) return;
@@ -782,9 +785,12 @@ async function metaCostsPage() {
 
 function updateAssignmentHeader() {
   const c=session.active;if(!c)return;
+  const allowed=canReply(c,session.user?.id);
+  $$('#message-form button, #message-form textarea, #send-template, #attachment-form button[type=submit], #template-form button[type=submit]').forEach(el=>el.disabled=!allowed || el.dataset.busy==='true');
+  const composer=$('#message-form textarea');if(composer)composer.placeholder=allowed ? 'Escreva uma mensagem' : replyInstruction(c);
   const label=$('#assigned-user-name');if(label)label.textContent=assignmentLabel(c);
-  const transfer=$('#transfer-user');if(transfer)transfer.disabled=c.status==='RESOLVED' || (session.user.role!=='ADMIN' && c.assignedUserId!==session.user.id);
-  const assign=$('#assign');if(assign){assign.textContent=c.assignedUserId===session.user.id ? 'Você está atendendo' : 'Assumir';assign.disabled=c.status==='RESOLVED' || c.assignedUserId===session.user.id;}
+  const transfer=$('#transfer-user');if(transfer)transfer.disabled=transfer.dataset.busy==='true' || c.status==='RESOLVED' || (session.user.role!=='ADMIN' && c.assignedUserId!==session.user.id);
+  const assign=$('#assign');if(assign){assign.textContent=c.assignedUserId===session.user.id ? 'Você está atendendo' : 'Assumir';assign.disabled=assign.dataset.busy==='true' || c.status==='RESOLVED' || c.assignedUserId===session.user.id;}
 }
 function forgetConversation(id) {
   session.conversations=session.conversations.filter(c=>c.id!==id);
@@ -809,4 +815,8 @@ async function transferConversation(c) {
     await loadConversations(session.filter);
     notice('Atendimento encaminhado com sucesso.');
   });
+}
+
+function assertCanReply(id) {
+  if(session.active?.id!==id || !canReply(session.active,session.user?.id)) throw new Error(replyInstruction(session.active));
 }

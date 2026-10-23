@@ -15,7 +15,7 @@ import { AttachmentUploadGate } from './attachment-upload';
 const agent = {userId:'agent-a',tenantId:'company-a',role:'AGENT',email:'a@example.com'};
 
 describe('Conversation HTTP access boundary',()=>{
-  let app:any, viewer:any, owner:string|null, tenant:string;
+  let app:any, viewer:any, owner:string|null, tenant:string, status:string;
   const handlers:any={};
   const notes={list:jest.fn().mockResolvedValue({items:[]}),create:jest.fn()};
   const photos={forConversation:jest.fn()};
@@ -24,7 +24,7 @@ describe('Conversation HTTP access boundary',()=>{
   const db={conversation:{findFirst:jest.fn(async({where}:any)=>{
     if(where.channel.tenantId!==tenant)return null;
     if(where.OR && !where.OR.some((rule:any)=>rule.assignedUserId===owner))return null;
-    return {id:'conversation'};
+    return {id:'conversation',assignedUserId:owner,status};
   })}};
   beforeAll(async()=>{
     for(const key of ['start','visibleAssignments','assign','sendTemplate','renameContact','setStage','setDepartment','remove','listForTenant','listMessages','sendMessage','updateStatus']) handlers[key]=jest.fn().mockResolvedValue([]);
@@ -36,7 +36,7 @@ describe('Conversation HTTP access boundary',()=>{
       .overrideInterceptor(AttachmentUploadGate).useValue({intercept:(_:any,next:any)=>next.handle()}).compile();
     app=module.createNestApplication();app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));await app.init();
   });
-  beforeEach(()=>{jest.clearAllMocks();viewer={...agent};owner='agent-b';tenant='company-a';});
+  beforeEach(()=>{jest.clearAllMocks();viewer={...agent};owner='agent-b';tenant='company-a';status='OPEN';});
   afterAll(async()=>app.close());
   it.each([
     ['get','messages'],['get','messages/message/media'],['get','photo'],['get','notes'],['post','notes'],
@@ -72,4 +72,32 @@ describe('Conversation HTTP access boundary',()=>{
     await request(app.getHttpServer()).post('/conversations/visibility').send({ids:Array(501).fill('11111111-1111-4111-8111-111111111111')}).expect(400);
     expect(handlers.visibleAssignments).not.toHaveBeenCalled();
   });
+  const sends:[string,object,string][]=[['messages',{text:'Oi'},'sendMessage'],['template',{name:'hello_world',language:'pt_BR',parameters:[]},'sendTemplate'],['attachments',{},'send']];
+  it.each(sends)('requires claiming before %s, for agents and administrators',async(route,payload,handler)=>{
+    owner=null;
+    for(const role of ['AGENT','ADMIN']){
+      viewer.role=role;
+      const response=await request(app.getHttpServer()).post(`/conversations/conversation/${route}`).send(payload).expect(403);
+      expect(response.body.message).toContain('Assuma');
+    }
+    expect(handler==='send'?sender.send:handlers[handler]).not.toHaveBeenCalled();
+  });
+  it.each(sends)('admin cannot send %s while another user owns the conversation',async(route,payload,handler)=>{
+    viewer.role='ADMIN';owner='agent-b';
+    await request(app.getHttpServer()).post(`/conversations/conversation/${route}`).send(payload).expect(403);
+    expect(handler==='send'?sender.send:handlers[handler]).not.toHaveBeenCalled();
+  });
+  it.each(sends)('current assignee can send %s after claiming, for either role',async(route,payload,handler)=>{
+    owner='agent-a';
+    for(const role of ['AGENT','ADMIN']){
+      viewer.role=role;await request(app.getHttpServer()).post(`/conversations/conversation/${route}`).send(payload).expect(201);
+    }
+    expect(handler==='send'?sender.send:handlers[handler]).toHaveBeenCalledTimes(2);
+  });
+  it.each(sends)('resolved conversation cannot receive an outgoing %s',async(route,payload,handler)=>{
+    owner='agent-a';status='RESOLVED';
+    await request(app.getHttpServer()).post(`/conversations/conversation/${route}`).send(payload).expect(403);
+    expect(handler==='send'?sender.send:handlers[handler]).not.toHaveBeenCalled();
+  });
+
 });
