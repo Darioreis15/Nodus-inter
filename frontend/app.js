@@ -1,3 +1,4 @@
+import { createAlertState, createAlertSound } from './message-alerts.js?v=1';
 import { assignmentLabel, reconcileAssignments, canReply, replyInstruction } from './conversation-assignment.js?v=2';
 import { renderMetaCosts } from './meta-costs.js?v=1';
 import { openImageViewer } from './image-viewer.js?v=23';
@@ -98,12 +99,17 @@ function passwordChange() {
 function renderShell() {
   const admin = session.user.role === 'ADMIN';
   const restricted = session.tenant.status === 'SUSPENDED';
-  app.innerHTML = `<div class="shell"><aside class="sidebar">${logo()}<nav>${!restricted ? `<button class="nav-item" data-filter="OPEN">⌂ <span>Caixa de entrada</span></button><button class="nav-item" data-filter="PENDING">◌ <span>Aguardando</span></button><button class="nav-item" data-filter="RESOLVED">✓ <span>Resolvidos</span></button><hr><button class="nav-item" data-page="logs">◫ <span>Logs de conversas</span></button><button class="nav-item" data-page="reports">▥ <span>Relatórios</span></button><button class="nav-item" data-page="funnel">⇢ <span>Funil</span></button>${admin ? '<button class="nav-item" data-page="users">♙ <span>Operadores</span></button><button class="nav-item" data-page="connections">◉ <span>Conexões</span></button><button class="nav-item" data-page="automations">⚡ <span>Automações</span></button><button class="nav-item" data-page="campaigns">◷ <span>Campanhas</span></button><button class="nav-item" data-page="metaCosts">＄ <span>Gastos Meta</span></button>' : ''}` : ''}${admin ? '<button class="nav-item" data-page="billing">＄ <span>Mensalidades</span></button>' : ''}<button class="nav-item" data-page="settings">⚙ <span>Configurações</span></button></nav><div class="sidebar-bottom"><button id="logout" class="profile"><div class="avatar small">${escape(session.user.name[0])}</div><span><strong>${escape(session.user.name)}</strong><em>Sair da conta</em></span>↗</button></div></aside><section class="inbox"><header class="inbox-header"><div><p class="eyebrow">ATENDIMENTOS</p><h1 id="list-title">Caixa de entrada</h1></div><button class="icon-btn" id="refresh" aria-label="Atualizar conversas">↻</button></header><button class="outline new-conversation" id="new-conversation">+ Nova conversa</button><label class="search">⌕<input id="search" placeholder="Buscar conversa" aria-label="Buscar conversa"></label><label class="search">Setor<select id="department-filter"><option value="">Todos os setores</option></select></label><div id="conversation-list" class="conversation-list"></div><button class="text-button" id="more-conversations" hidden>Carregar mais conversas</button></section><section id="chat" class="chat empty"></section></div>`;
+  app.innerHTML = `<div class="shell"><aside class="sidebar">${logo()}<nav>${!restricted ? `<button class="nav-item" data-filter="OPEN">⌂ <span>Caixa de entrada</span></button><button class="nav-item" data-filter="PENDING">◌ <span>Aguardando</span></button><button class="nav-item" data-filter="RESOLVED">✓ <span>Resolvidos</span></button><hr><button class="nav-item" data-page="logs">◫ <span>Logs de conversas</span></button><button class="nav-item" data-page="reports">▥ <span>Relatórios</span></button><button class="nav-item" data-page="funnel">⇢ <span>Funil</span></button>${admin ? '<button class="nav-item" data-page="users">♙ <span>Operadores</span></button><button class="nav-item" data-page="connections">◉ <span>Conexões</span></button><button class="nav-item" data-page="automations">⚡ <span>Automações</span></button><button class="nav-item" data-page="campaigns">◷ <span>Campanhas</span></button><button class="nav-item" data-page="metaCosts">＄ <span>Gastos Meta</span></button>' : ''}` : ''}${admin ? '<button class="nav-item" data-page="billing">＄ <span>Mensalidades</span></button>' : ''}<button class="nav-item" data-page="settings">⚙ <span>Configurações</span></button></nav><div class="sidebar-bottom"><button class="outline" id="alert-sound" type="button">Ativar som</button><p id="alert-count" role="status" class="muted">Nenhuma mensagem nova</p><button id="logout" class="profile"><div class="avatar small">${escape(session.user.name[0])}</div><span><strong>${escape(session.user.name)}</strong><em>Sair da conta</em></span>↗</button></div></aside><section class="inbox"><header class="inbox-header"><div><p class="eyebrow">ATENDIMENTOS</p><h1 id="list-title">Caixa de entrada</h1></div><button class="icon-btn" id="refresh" aria-label="Atualizar conversas">↻</button></header><button class="outline new-conversation" id="new-conversation">+ Nova conversa</button><label class="search">⌕<input id="search" placeholder="Buscar conversa" aria-label="Buscar conversa"></label><label class="search">Setor<select id="department-filter"><option value="">Todos os setores</option></select></label><div id="conversation-list" class="conversation-list"></div><button class="text-button" id="more-conversations" hidden>Carregar mais conversas</button></section><section id="chat" class="chat empty"></section></div>`;
   $$('.nav-item').forEach(btn => btn.onclick = () => btn.dataset.page ? openPage(btn.dataset.page) : loadConversations(btn.dataset.filter));
   $('#refresh').onclick = () => loadConversations(session.filter);
   $('#new-conversation').onclick = newConversation;
   $('#department-filter').onchange = () => loadConversations(session.filter);
   $('#search').oninput = e => drawList(e.target.value);
+  $('#alert-sound').onclick = e => busy(e.currentTarget, async () => {
+    if (alertSound.enabled()) alertSound.mute(); else await alertSound.enable();
+    e.currentTarget.textContent = alertSound.enabled() ? 'Silenciar som' : 'Ativar som';
+  });
+  updateAlertTitle(alertState.count());
   $('#logout').onclick = () => logout(true);
   $('#more-conversations').onclick = e => busy(e.currentTarget, () => loadConversations(session.filter, true));
 }
@@ -190,6 +196,8 @@ function drawMessages(bottom = true) {
   attachmentPreviews.observe(el);
   $$('[data-media-id]', el).forEach(button => button.onclick = () => busy(button, () => openMessageMedia(button.dataset.mediaId)));
   if (bottom) el.scrollTop = el.scrollHeight;
+  markVisibleMessages();
+  el.onscroll = markVisibleMessages;
 }
 async function fetchMessageMedia(id, signal) {
   const message=session.messages.find(m=>m.id===id), conversationId=session.active?.id, token=session.token;
@@ -689,6 +697,7 @@ async function reportsPage() {
   $('#page-content').innerHTML = `<div class="metrics">${['OPEN','PENDING','RESOLVED'].map(k => `<article><small>${labels[k]}</small><strong>${escape(counts[k] || 0)}</strong></article>`).join('')}<article><small>Primeira resposta média</small><strong>${escape(r.averageFirstResponseMinutes == null ? '—' : `${r.averageFirstResponseMinutes} min`)}</strong></article></div><section class="card"><h2>Chamados finalizados por usuário</h2><p class="muted">Total de conversas atualmente finalizadas, por quem concluiu o atendimento. Não se limita aos últimos 7 dias. Conversas reabertas deixam esta contagem até serem finalizadas novamente.</p>${Array.isArray(r.resolvedByUser) ? (r.resolvedByUser.length ? r.resolvedByUser.map(u => `<div class="data-row"><strong>${escape(u.name)}</strong><span>${escape(u.count)} chamado(s) finalizado(s)</span></div>`).join('') : '<p class="muted">Nenhum chamado finalizado.</p>') : '<p class="muted">Atualize o backend para carregar os chamados por usuário.</p>'}</section><section class="card"><h2>Mensagens nos últimos 7 dias</h2>${(r.messagesLast7Days || []).map(x => `<div class="data-row"><strong>${escape(x.date)}</strong><span>${escape(x.count)} mensagens</span></div>`).join('')}</section>`;
 }
 function logout(revoke = false) {
+  alertQuery = null; alertState.reset(); alertSound.mute();
   attachmentPreviews.clear();
   contactPhotos.clear();
   if (revoke && session.token) api('/auth/logout-all', { method:'POST', body:'{}' }).catch(() => notice('Você saiu deste navegador, mas não foi possível revogar as outras sessões.'));
@@ -696,7 +705,8 @@ function logout(revoke = false) {
 }
 async function startApp() {
   const identity = await api('/auth/me'); session.user = identity.user; session.tenant = identity.tenant;
-  renderShell(); if (identity.tenant.status === 'SUSPENDED') openPage('billing'); else await loadConversations();
+  alertQuery = null; alertState.reset();
+  renderShell(); alertsRefresh.wake(); if (identity.tenant.status === 'SUSPENDED') openPage('billing'); else await loadConversations();
 }
 // Refresh messages every five seconds; the first conversation page every ten.
 // Revalidate session/navigation after every await so stale requests cannot repaint.
@@ -793,6 +803,7 @@ function updateAssignmentHeader() {
   const assign=$('#assign');if(assign){assign.textContent=c.assignedUserId===session.user.id ? 'Você está atendendo' : 'Assumir';assign.disabled=assign.dataset.busy==='true' || c.status==='RESOLVED' || c.assignedUserId===session.user.id;}
 }
 function forgetConversation(id) {
+  alertState.retain(alertState.conversations().filter(c => c !== id));
   session.conversations=session.conversations.filter(c=>c.id!==id);
   if(session.active?.id===id){
     session.active=null;session.messages=[];session.generation++;
@@ -820,3 +831,50 @@ async function transferConversation(c) {
 function assertCanReply(id) {
   if(session.active?.id!==id || !canReply(session.active,session.user?.id)) throw new Error(replyInstruction(session.active));
 }
+
+
+// Independent from page/filter, also runs in background (subject to browser throttling).
+const baseTitle = 'Nodus — Atendimento';
+const alertSound = createAlertSound();
+function updateAlertTitle(count) {
+  document.title = count ? `(${count}) ${baseTitle}` : baseTitle;
+  const label = $('#alert-count');
+  if (label) label.textContent = count ? `${count} mensagem(ns) nova(s)` : 'Nenhuma mensagem nova';
+}
+const alertState = createAlertState(updateAlertTitle, () => alertSound.play());
+let alertQuery = null;
+function markVisibleMessages() {
+  const el = $('#messages');
+  if (!el || !session.active || session.page || document.hidden || !document.hasFocus()) return;
+  const bounds = el.getBoundingClientRect();
+  if (!bounds.width || !bounds.height || bounds.right <= 0 || bounds.left >= window.innerWidth || bounds.bottom <= 0 || bounds.top >= window.innerHeight || $('#modal')?.open) return;
+  const ids = new Set([...el.querySelectorAll('[data-message-id]')].filter(node => {
+    const r = node.getBoundingClientRect(); return r.bottom > bounds.top && r.top < bounds.bottom;
+  }).map(node => node.dataset.messageId));
+  alertState.read(session.messages.filter(m => m.direction === 'INBOUND' && ids.has(m.id)));
+}
+const alertsRefresh = createAutoRefresh({
+  interval: 5000,
+  enabled: () => !!session.token && !!session.user && session.tenant?.status !== 'SUSPENDED' && navigator.onLine !== false,
+  refresh: async () => {
+    const token = session.token;
+    const result = await api(`/conversations/incoming-alerts${alertQuery ? `?${new URLSearchParams(alertQuery)}` : ''}`);
+    if (session.token !== token) return;
+    if (result.initialized) alertState.reset(result.next.since);
+    markVisibleMessages();
+    alertState.ingest(result.items);
+    alertQuery = result.next;
+    const ids = alertState.conversations(), allowed = [];
+    for (let i = 0; i < ids.length; i += 500) {
+      const rows = await api('/conversations/visibility', { method: 'POST', body: body({ ids: ids.slice(i, i + 500) }) });
+      if (session.token !== token) return;
+      allowed.push(...rows.map(c => c.id));
+    }
+    alertState.retain(allowed);
+  },
+  onError: error => { if (error.status === 403) { alertQuery = null; alertState.reset(); } },
+});
+alertsRefresh.start();
+window.addEventListener('focus', () => { markVisibleMessages(); alertsRefresh.wake(); });
+window.addEventListener('online', () => alertsRefresh.wake());
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { markVisibleMessages(); alertsRefresh.wake(); } });

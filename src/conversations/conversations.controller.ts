@@ -1,3 +1,4 @@
+import { IncomingAlertsQuery } from './incoming-alerts';
 import { ConversationAccessGuard, RequireConversationAssignee } from './conversation-access.guard';
 import { ConversationVisibilityDto, TransferConversationDto } from './dto/conversation-visibility.dto';
 import { MessageMediaService } from './message-media.service';
@@ -56,6 +57,12 @@ export class ConversationsController {
   @Delete(':id')
   remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.conversationsService.remove(user.tenantId, id, user.userId);
+  }
+
+  @Get('incoming-alerts')
+  @Header('Cache-Control', 'no-store')
+  incomingAlerts(@CurrentUser() user: AuthenticatedUser, @Query() query: IncomingAlertsQuery) {
+    return this.conversationsService.incomingAlerts(user, query);
   }
 
   @Get()
