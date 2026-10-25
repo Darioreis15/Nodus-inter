@@ -1,3 +1,4 @@
+import { listContactHistory, historyAttachmentConversation } from './contact-history';
 import { incomingAlerts, IncomingAlertsQuery } from './incoming-alerts';
 import { conversationAccess } from './conversation-access.guard';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -333,6 +334,14 @@ export class ConversationsService {
       await tx.auditEvent.create({ data: { tenantId, actorId: actor?.id, action: `conversation.${status.toLowerCase()}:${conversationId}` } });
       return updated;
     });
+  }
+
+  listContactHistory(user: AuthenticatedUser, conversationId: string, cursor?: string) {
+    return listContactHistory(this.prisma, user, conversationId, cursor);
+  }
+
+  historyAttachmentConversation(user: AuthenticatedUser, conversationId: string, messageId: string) {
+    return historyAttachmentConversation(this.prisma, user, conversationId, messageId);
   }
 
   async listMessages(tenantId: string, conversationId: string, cursor?: string) {

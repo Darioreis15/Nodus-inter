@@ -94,6 +94,21 @@ export class ConversationsController {
     return new StreamableFile(file.buffer, { type: file.mimeType, length: file.buffer.length, disposition: `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName).replace(/'/g, '%27')}` });
   }
 
+  @Get(':id/history')
+  @Header('Cache-Control', 'no-store')
+  history(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Query('cursor') cursor?: string) {
+    return this.conversationsService.listContactHistory(user, id, cursor);
+  }
+
+  @Get(':id/history/:messageId/media')
+  @Header('Cache-Control', 'no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  async historyMedia(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Param('messageId') messageId: string) {
+    const source = await this.conversationsService.historyAttachmentConversation(user, id, messageId);
+    const file = await this.media.download(user.tenantId, source, messageId);
+    return new StreamableFile(file.buffer, { type: file.mimeType, length: file.buffer.length, disposition: `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName).replace(/'/g, '%27')}` });
+  }
+
   @Get(':id/messages')
   listMessages(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Query('cursor') cursor?: string) {
     return this.conversationsService.listMessages(user.tenantId, id, cursor);

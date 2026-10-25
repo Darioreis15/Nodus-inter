@@ -155,7 +155,14 @@ async function openConversation(id) {
   }); updateAssignmentHeader(); };
   $('#transfer-user').onclick=e=>busy(e.currentTarget,()=>transferConversation(c));
   updateAssignmentHeader();
-  $('#resolve').onclick = e => busy(e.currentTarget, async () => { await api(`/conversations/${encoded(id)}/status`, { method:'PATCH', body:body({ status:'RESOLVED' }) }); await loadConversations(session.filter); notice('Atendimento finalizado.'); });
+  $('#resolve').onclick = e => busy(e.currentTarget, async () => {
+    const updated = await api(`/conversations/${encoded(id)}/status`, { method:'PATCH', body:body({ status:'RESOLVED' }) });
+    if (session.active?.id !== id) return;
+    Object.assign(c, updated);
+    session.conversations = session.conversations.filter(row => row.id !== id || session.filter === 'RESOLVED');
+    drawList(); updateAssignmentHeader(); nextListRefresh = 0;
+    notice('Atendimento finalizado. O histórico continua disponível nesta tela e em Resolvidos.');
+  });
   contactPhotos.observe(chat);
   $('#rename-contact').onclick = () => { modal('Nome do contato', `<form id="name-form"><label>Nome<input name="name" maxlength="120" value="${escape(c.contact.name || '')}" required></label><button type="submit" class="primary">Salvar</button></form>`); bindForm('#name-form', async data => { await api(`/conversations/${encoded(id)}/contact`, { method:'PATCH', body:body(data) }); c.contact.name = data.name; $('#modal').close(); openConversation(id); }); };
   if ($('#delete-conversation')) $('#delete-conversation').onclick = e => busy(e.currentTarget, async () => { if (!confirm('Excluir esta conversa e suas mensagens da plataforma? As cópias no celular e em outros sistemas permanecem.')) return; await api(`/conversations/${encoded(id)}`, { method:'DELETE' }); await loadConversations(session.filter); notice('Conversa excluída.'); });
@@ -172,18 +179,18 @@ async function openConversation(id) {
   if(c.status==='RESOLVED'){ $$('#message-form button, #message-form textarea, #assign, #transfer-user, #resolve, #transfer-department, #send-template').forEach(el=>el.disabled=true);$('#message-form textarea').placeholder='Atendimento finalizado. Use Nova conversa para continuar.'; }
   $('#older-messages').onclick = e => busy(e.currentTarget, async () => {
     const oldest = [...session.messages].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id.localeCompare(b.id))[0];
-    const rows = await api(`/conversations/${encoded(id)}/messages?cursor=${encoded(oldest.id)}`);
+    const rows = await api(`/conversations/${encoded(id)}/history?cursor=${encoded(oldest.id)}`);
     if (session.active?.id !== id) return;
     session.messages = [...session.messages, ...rows.filter(m => !session.messages.some(x => x.id === m.id))];
     $('#older-messages').hidden = rows.length < 100; drawMessages(false);
   });
-  try { const rows = await api(`/conversations/${encoded(id)}/messages`); if (generation !== session.generation) return; session.messages = rows; $('#older-messages').hidden = rows.length < 100; drawMessages(); } catch (err) { if (generation !== session.generation) return; if (err.status===404) { forgetConversation(id); notice(err.message); } else if ($('#messages')) $('#messages').textContent = err.message; }
+  try { const rows = await api(`/conversations/${encoded(id)}/history`); if (generation !== session.generation) return; session.messages = rows; $('#older-messages').hidden = rows.length < 100; drawMessages(); } catch (err) { if (generation !== session.generation) return; if (err.status===404) { forgetConversation(id); notice(err.message); } else if ($('#messages')) $('#messages').textContent = err.message; }
 }
 function drawMessages(bottom = true) {
   const el = $('#messages'); if (!el) return;
   const oldNodes = new Map([...el.querySelectorAll('[data-message-id]')].map(node => [node.dataset.messageId, node]));
   const fragment = document.createElement('div');
-  fragment.innerHTML = session.messages.length ? [...session.messages].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id.localeCompare(b.id)).map(m => `<div data-message-id="${escape(m.id)}" class="message ${m.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}">${m.media ? `${m.media.kind === 'image' || m.media.mimeType === 'application/pdf' ? `<div class="attachment-preview ${m.media.kind === 'image' ? 'preview-image' : 'preview-pdf'}" data-preview-id="${escape(m.id)}">Carregando prévia…</div>` : ''}<button type="button" class="message-attachment" data-media-id="${escape(m.id)}">${m.media.kind === 'image' ? '📷 Ampliar foto' : m.media.mimeType === 'application/pdf' ? '📄 Abrir ou baixar PDF' : '📎 Baixar documento'}<small>${escape(m.media.fileName)}</small></button>` : ''}${m.body ? `<p>${escape(m.body)}</p>` : ''}<time>${escape(date(m.createdAt))} · <span class="message-receipt ${m.status === 'READ' && m.direction === 'OUTBOUND' ? 'is-read' : ''}">${m.direction === 'OUTBOUND' ? m.status === 'READ' || m.status === 'DELIVERED' ? '✓✓ ' : m.status === 'SENT' ? '✓ ' : '' : ''}${escape(labels[m.status] || m.status)}</span></time></div>`).join('') : '<p class="no-results">Escreva a primeira mensagem para iniciar o atendimento.</p>';
+  fragment.innerHTML = session.messages.length ? [...session.messages].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id.localeCompare(b.id)).map(m => `<div data-message-id="${escape(m.id)}" class="message ${m.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}">${m.media ? `${m.media.kind === 'image' || m.media.mimeType === 'application/pdf' ? `<div class="attachment-preview ${m.media.kind === 'image' ? 'preview-image' : 'preview-pdf'}" data-preview-id="${escape(m.id)}">Carregando prévia…</div>` : ''}<button type="button" class="message-attachment" data-media-id="${escape(m.id)}">${m.media.kind === 'image' ? '📷 Ampliar foto' : m.media.mimeType === 'application/pdf' ? '📄 Abrir ou baixar PDF' : '📎 Baixar documento'}<small>${escape(m.media.fileName)}</small></button>` : ''}${m.body ? `<p>${escape(m.body)}</p>` : ''}<time>${m.previousAttendance ? 'Atendimento anterior · ' : ''}${escape(date(m.createdAt))} · <span class="message-receipt ${m.status === 'READ' && m.direction === 'OUTBOUND' ? 'is-read' : ''}">${m.direction === 'OUTBOUND' ? m.status === 'READ' || m.status === 'DELIVERED' ? '✓✓ ' : m.status === 'SENT' ? '✓ ' : '' : ''}${escape(labels[m.status] || m.status)}</span></time></div>`).join('') : '<p class="no-results">Escreva a primeira mensagem para iniciar o atendimento.</p>';
   const nextNodes = [...fragment.children].map(node => {
     const id = node.dataset.messageId, message = session.messages.find(m => m.id === id);
     const signature = message && JSON.stringify([message.body, message.media, message.direction]);
@@ -202,7 +209,7 @@ function drawMessages(bottom = true) {
 async function fetchMessageMedia(id, signal) {
   const message=session.messages.find(m=>m.id===id), conversationId=session.active?.id, token=session.token;
   if(!message?.media || !conversationId || !token)throw new Error('Conversa indisponível.');
-  const response=await fetch(`${API_URL}/conversations/${encoded(conversationId)}/messages/${encoded(id)}/media`, {headers:{Authorization:`Bearer ${token}`},cache:'no-store',signal:signal ? AbortSignal.any([signal, AbortSignal.timeout(45000)]) : AbortSignal.timeout(45000)});
+  const response=await fetch(`${API_URL}/conversations/${encoded(conversationId)}/history/${encoded(id)}/media`, {headers:{Authorization:`Bearer ${token}`},cache:'no-store',signal:signal ? AbortSignal.any([signal, AbortSignal.timeout(45000)]) : AbortSignal.timeout(45000)});
   if(!response.ok){const data=await response.json().catch(()=>({}));if(response.status===401 && session.token===token)logout(false);throw new Error(data.message || 'Não foi possível abrir o anexo.');}
   const blob=await response.blob();
   if(session.token!==token || session.active?.id!==conversationId || session.page)throw new Error('Conversa alterada.');
@@ -718,7 +725,7 @@ const autoRefresh = createAutoRefresh({
     const current = () => session.token === token && session.generation === generation && !session.page;
     if (id) {
       let rows;
-      try { rows = await api(`/conversations/${encoded(id)}/messages`); }
+      try { rows = await api(`/conversations/${encoded(id)}/history`); }
       catch (err) {
         if (!current()) return;
         if (err.status === 404) { forgetConversation(id); nextListRefresh = 0; notice('Este atendimento não está mais disponível para você.'); }
@@ -795,6 +802,7 @@ async function metaCostsPage() {
 
 function updateAssignmentHeader() {
   const c=session.active;if(!c)return;
+  $$('#resolve, #transfer-department').forEach(el => el.disabled = c.status === 'RESOLVED' || el.dataset.busy === 'true');
   const allowed=canReply(c,session.user?.id);
   $$('#message-form button, #message-form textarea, #send-template, #attachment-form button[type=submit], #template-form button[type=submit]').forEach(el=>el.disabled=!allowed || el.dataset.busy==='true');
   const composer=$('#message-form textarea');if(composer)composer.placeholder=allowed ? 'Escreva uma mensagem' : replyInstruction(c);

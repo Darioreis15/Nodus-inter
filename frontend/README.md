@@ -70,3 +70,24 @@ Validação automatizada:
 - `node tests/frontend/auto-refresh.cjs`
 - `node node_modules/jest/bin/jest.js --runInBand src/conversations/incoming-alerts.spec.ts src/conversations/conversation-access.spec.ts`
 - `npm run build`
+
+## Histórico contínuo após finalizar
+
+A tela usa `GET /conversations/:id/history`: mostra o atendimento atual e os
+atendimentos anteriores já finalizados do mesmo contato e canal, em ordem de data
+com paginação (Carregar mensagens anteriores). O usuário deve ter acesso ao
+atendimento atual. Esse acesso concede contexto de leitura dos casos anteriores,
+inclusive os atendidos por outros operadores; não concede edição nem acesso a
+outros casos ativos. Empresa, canal e contato são conferidos no servidor.
+
+Finalizar mantém o histórico aberto e bloqueia novos envios nesse atendimento.
+Uma nova mensagem continua abrindo outro atendimento, preservando os relatórios,
+responsáveis e datas de finalização, mas o novo atendimento mostra o histórico
+anterior com a indicação "Atendimento anterior". Anexos históricos passam por
+verificação equivalente antes do download; mídias expiradas no provedor podem
+não estar mais disponíveis. Exclusão explícita e retenção continuam valendo:
+esta mudança não recupera mensagens já removidas do banco.
+
+Publicação: primeiro deploy do backend; depois atualizar index.html e app.js na
+Hostinger. O pacote inclui também os arquivos de alertas da versão anterior para
+manter a instalação compatível. Não há nova migração de banco nesta correção.
