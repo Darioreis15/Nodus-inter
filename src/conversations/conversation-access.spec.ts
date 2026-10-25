@@ -39,7 +39,7 @@ describe('Conversation HTTP access boundary',()=>{
   beforeEach(()=>{jest.clearAllMocks();viewer={...agent};owner='agent-b';tenant='company-a';status='OPEN';});
   afterAll(async()=>app.close());
   it.each([
-    ['get','messages'],['get','messages/message/media'],['get','photo'],['get','notes'],['post','notes'],
+    ['get','messages'],['get','history'],['get','history/message/media'],['get','messages/message/media'],['get','photo'],['get','notes'],['post','notes'],
     ['post','messages'],['post','attachments'],['post','template'],['post','transfer'],
     ['patch','contact'],['patch','stage'],['patch','department'],['patch','status'],['patch','assign'],['delete',''],
   ])('denies another operator via %s %s before any handler or upload',async(method,suffix)=>{
