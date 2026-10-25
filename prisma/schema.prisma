@@ -213,6 +213,7 @@ model Message {
 
   @@index([conversationId])
   @@index([externalId])
+  @@index([direction, createdAt, id])
   @@map("messages")
 }
 

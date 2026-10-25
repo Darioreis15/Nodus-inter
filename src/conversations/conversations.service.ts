@@ -1,3 +1,4 @@
+import { incomingAlerts, IncomingAlertsQuery } from './incoming-alerts';
 import { conversationAccess } from './conversation-access.guard';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { phoneAliases, resolveContact } from './contact-identity';
@@ -35,6 +36,10 @@ export class ConversationsService {
     private metaConnector: MetaConnector,
     private outboundWebhooks: OutboundWebhooksService,
   ) {}
+
+  incomingAlerts(user: AuthenticatedUser, query: IncomingAlertsQuery) {
+    return incomingAlerts(this.prisma, user, query);
+  }
 
   private connectorFor(channelType: 'QR_EVOLUTION' | 'OFFICIAL_META'): ChannelConnector {
     return channelType === 'QR_EVOLUTION' ? this.evolutionConnector : this.metaConnector;

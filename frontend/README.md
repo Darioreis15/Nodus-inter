@@ -34,3 +34,39 @@ Atualização v18 — navegação: as telas são exibidas somente depois de orga
 Atualização v38 — atendimentos por responsável: nome do atendente abaixo do contato, conversas assumidas disponíveis apenas ao responsável e administradores, botão Encaminhar para outro usuário da mesma empresa e atualização automática da lista. Publique primeiro o backend do mesmo PR. Depois substitua todos os arquivos do app, incluindo conversation-assignment.js; mantenha owner/ como subpasta e limpe o cache. Sem novas variáveis, seed ou migrações. Consulte docs/ATENDIMENTOS-PRIVADOS.md no repositório para o roteiro de homologação com dois operadores e um administrador.
 
 Atualização v39 — assumir antes de responder: operadores e administradores precisam ser o responsável atual para enviar texto, anexo ou template pelo app. O campo de resposta explica que é necessário clicar em Assumir. Integrações por chave de API e automações mantêm seu funcionamento. Publicar backend primeiro, substituir o frontend completo e limpar o cache. Sem migração, seed ou novas variáveis.
+
+## Avisos de novas mensagens na aba
+
+1. Faça o merge e aguarde o backend no Render ficar Live. O start com
+   `prisma migrate deploy` aplica o índice de consulta de mensagens.
+2. Na Hostinger, atualize o app com `index.html`, `app.js`, `pages.css` e
+   `message-alerts.js` deste mesmo commit. Preserve o domínio da API configurado
+   e os demais arquivos. Não envie estes arquivos à página institucional nem a `/owner/`.
+3. Recarregue com Ctrl+F5, entre e clique em **Ativar som** na barra lateral.
+   Um toque confirma que o navegador liberou o áudio. **Silenciar som** desativa.
+4. Abra outra aba e mande duas mensagens ao WhatsApp conectado. O título deve
+   mostrar `(2) Nodus — Atendimento`; ao visualizar as mensagens, o total diminui.
+5. Repita com um operador: somente fila sem responsável e conversas próprias
+   geram alertas. Administradores recebem as conversas da sua empresa.
+
+O contador representa mensagens recebidas após iniciar esta sessão que ainda
+não foram visualizadas nesta aba; não é o total histórico de não lidas do WhatsApp.
+Mensagens exibidas na área visível da conversa, com a janela em foco, são retiradas
+individualmente. Rolar o histórico revela e retira as demais. Isso não envia
+confirmação de leitura ao WhatsApp. Sair/recarregar limpa o contador e exige
+reativar o som. Cada aba tem estado e áudio independentes: prefira uma aba aberta.
+
+A consulta ocorre a cada 5 segundos, inclusive em outras páginas do app e em
+segundo plano, com paginação de 100 mensagens, deduplicação e recuo após falhas/429.
+O navegador pode atrasar ou suspender abas em segundo plano; não há push com o
+navegador fechado, computador em suspensão ou sem conexão. Após mais de 24 horas
+sem sincronizar, inicia uma nova base sem reproduzir histórico. A sobreposição
+entre consultas tolera commits atrasados até 30 segundos; não é um log durável
+de entrega de notificações. Nenhuma mensagem, telefone ou credencial fica no
+armazenamento do navegador para este recurso.
+
+Validação automatizada:
+- `node tests/frontend/message-alerts.cjs`
+- `node tests/frontend/auto-refresh.cjs`
+- `node node_modules/jest/bin/jest.js --runInBand src/conversations/incoming-alerts.spec.ts src/conversations/conversation-access.spec.ts`
+- `npm run build`
